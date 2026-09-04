@@ -13,6 +13,7 @@ captures/
 runs/
 data/*.db
 data/*.sqlite*
+data/runtime_state.json
 data/knowledge/
 data/sprites/
 config.toml
