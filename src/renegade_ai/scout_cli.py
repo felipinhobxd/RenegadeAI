@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> None:
             scout.watch(args.watch_seconds)
     except KeyboardInterrupt:
         print("Scout stopped by user; captures already written are preserved.")
-    except Exception as exc:  # noqa: BLE001 - CLI should report emulator/UI failures cleanly
+    except Exception as exc:
         print(f"Scout stopped safely: {exc}")
         raise SystemExit(2) from exc
 
