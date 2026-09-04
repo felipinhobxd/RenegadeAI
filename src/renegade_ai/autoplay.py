@@ -133,13 +133,13 @@ def run_daemon(
         memory_client: GDBRemoteClient | None = None
         try:
             dex = ensure_renegade_dex(reporter=_log)
-            from renegade_ai.campaign.runtime import CampaignAutopilot
+            from renegade_ai.campaign.smart_runtime import SmartCampaignAutopilot
 
             memory_client, structured_reader = _connect_structured_memory(config)
             evolve = ASIEvolveEngine(
                 qtable_path=config.learning.qtable.with_name("evolve_qtable.json"),
             )
-            campaign = CampaignAutopilot(
+            campaign = SmartCampaignAutopilot(
                 adapter,
                 config.capture.screen_layout,
                 dex=dex,
@@ -148,14 +148,14 @@ def run_daemon(
                 poll_seconds=poll_seconds,
             )
             mode = (
-                "structured RAM + vision"
+                "structured RAM + balanced frontier navigation"
                 if structured_reader is not None
-                else "vision/OCR fallback"
+                else "balanced vision/OCR fallback"
             )
             _log(
                 "Autonomous campaign started: "
-                f"navigation={mode}; screenshots/scouting, dialogue handling, "
-                "battles and ASI-Evolve are active."
+                f"navigation={mode}; stuck screenshots, dialogue recovery, "
+                "battle takeover and ASI-Evolve are active."
             )
             result = campaign.run()
             _log(
