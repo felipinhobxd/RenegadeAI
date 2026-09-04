@@ -14,7 +14,7 @@ if (-not (Test-Path $PythonExe)) {
 }
 
 Write-Host "Installing/updating RenegadeAI + vision dependencies..."
-$EditableTarget = "$RepoRoot[dev,vision]"
+$EditableTarget = "${RepoRoot}[dev,vision]"
 & $PythonExe -m pip install -e $EditableTarget
 if ($LASTEXITCODE -ne 0) {
     throw "pip installation failed with exit code $LASTEXITCODE"
