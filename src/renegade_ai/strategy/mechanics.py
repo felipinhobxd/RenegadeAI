@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from renegade_ai.knowledge.models import MoveData
 
-
 _PUNCHING_MOVES = {
     "bullet-punch",
     "comet-punch",
