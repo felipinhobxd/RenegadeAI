@@ -13,7 +13,6 @@ from renegade_ai.knowledge.dex import DEFAULT_KNOWLEDGE_DIR
 from renegade_ai.knowledge.models import LearnMove, MoveData, PokemonData
 from renegade_ai.strategy.profiles import build_all_profiles
 
-
 WIKI_REPOSITORY = "zhenga8533/renegade-platinum-wiki"
 # Pin knowledge parsing to a known wiki revision so a future wiki layout change
 # cannot silently corrupt the agent's battle data.
@@ -46,7 +45,7 @@ _STAT_RE = {
 
 def _request_bytes(url: str, timeout: float = 30.0) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed HTTPS sources
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
 
 
@@ -118,7 +117,9 @@ def _parse_move_row(line: str, method: str) -> tuple[LearnMove, MoveData] | None
     )
 
 
-def parse_pokemon_page(slug: str, text: str, source_url: str) -> tuple[PokemonData, dict[str, MoveData]]:
+def parse_pokemon_page(
+    slug: str, text: str, source_url: str
+) -> tuple[PokemonData, dict[str, MoveData]]:
     title_match = re.search(r"^# (.+)$", text, flags=re.MULTILINE)
     dex_match = _DEX_RE.search(text)
     if title_match is None or dex_match is None:
@@ -206,7 +207,7 @@ def _atomic_json(path: Path, value: Any) -> None:
 def _wiki_entries() -> list[dict[str, Any]]:
     raw = json.loads(_request_text(WIKI_API))
     if not isinstance(raw, list):
-        raise RuntimeError("Unexpected GitHub response while listing Renegade Platinum Pokemon")
+        raise TypeError("Unexpected GitHub response while listing Renegade Platinum Pokemon")
     return [
         item
         for item in raw
@@ -253,7 +254,9 @@ def sync_knowledge(
     strategies = build_all_profiles(pokemon, moves)
     _atomic_json(root / "pokemon.json", {slug: value.to_dict() for slug, value in pokemon.items()})
     _atomic_json(root / "moves.json", {slug: value.to_dict() for slug, value in moves.items()})
-    _atomic_json(root / "strategies.json", {slug: value.to_dict() for slug, value in strategies.items()})
+    _atomic_json(
+        root / "strategies.json", {slug: value.to_dict() for slug, value in strategies.items()}
+    )
     _atomic_json(
         root / "manifest.json",
         {
