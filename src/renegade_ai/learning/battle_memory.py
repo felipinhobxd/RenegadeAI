@@ -212,17 +212,12 @@ class BattleAdaptiveMemory:
         self._record_breakdown(pending, breakdown)
         self.qtable.update(pending.state_key, pending.action_id, reward, None)
         self.qtable.save(self.path)
-        # Give the ASI-Evolve policy the same bounded net outcome so its
-        # confidence-weighted correction can mature with repeated evidence.
-        if reward >= 0:
-            kind = RewardKind.OBJECTIVE_PROGRESS
-            magnitude = min(1.0, reward / 100.0)
-        else:
-            kind = RewardKind.WASTED_ITEM
-            magnitude = min(1.0, abs(reward) / 100.0)
+        # The net turn outcome trains the state/action preference while the
+        # detailed ledger above keeps damage, KO and status causes auditable.
+        kind = RewardKind.GOOD_TURN if reward >= 0 else RewardKind.BAD_TURN
         self.evolve.record(
             kind,
-            magnitude=magnitude,
+            magnitude=min(1.0, abs(reward) / 100.0),
             state_key=pending.state_key,
             action_id=pending.action_id,
             metadata={"source": "net_battle_turn", "net_reward": reward},
@@ -255,5 +250,5 @@ class BattleAdaptiveMemory:
         token: str | None = None,
         metadata: dict[str, object] | None = None,
     ) -> float:
-        """Hook for future badge, boss, evolution and game-complete detectors."""
+        """Hook for badge, boss, evolution and game-complete detectors."""
         return self.evolve.record(kind, token=token, metadata=dict(metadata or {}))
