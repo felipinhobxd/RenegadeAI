@@ -1,14 +1,15 @@
+# Copy this file to config.toml only when you need to override defaults.
+# RenegadeAI v0.5 autoplay works with these defaults and can start without a
+# config.toml. The background watcher simply waits until a melonDS window exists.
+
 [melonds]
 window_title = "melonDS"
 focus_before_input = true
 press_seconds = 0.06
-# Directions need a slightly longer hold on stock melonDS.
 direction_press_seconds = 0.14
-# auto = native Windows scan-code input on Windows, PyAutoGUI elsewhere.
+# auto = native Windows SendInput on Windows, PyAutoGUI elsewhere
 input_backend = "auto"
 
-# These are common keyboard bindings, but melonDS lets you remap every key.
-# Make these match Config > Input and hotkeys > DS keypad in your installation.
 [melonds.keys]
 a = "x"
 b = "z"
@@ -23,10 +24,9 @@ down = "down"
 left = "left"
 right = "right"
 
-# Crop pixels from the OUTER melonDS window before perception.
-# Start with zero. RenegadeAI now automatically finds the centered DS viewport
-# and removes the black bars/title/menu chrome after this optional manual crop.
 [capture]
+# Insets normally remain zero because the viewport detector removes melonDS
+# window chrome/black bars automatically.
 inset_left = 0
 inset_top = 0
 inset_right = 0
