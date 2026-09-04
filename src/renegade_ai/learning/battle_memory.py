@@ -73,7 +73,7 @@ class BattleAdaptiveMemory:
 
     def __init__(
         self,
-        path: str | Path = Path("data/qtable.json"),
+        path: str | Path = Path("data/battle_adaptive.json"),
         *,
         alpha: float = 0.20,
     ) -> None:
