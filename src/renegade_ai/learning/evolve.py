@@ -18,6 +18,8 @@ class RewardKind(StrEnum):
     OWN_FAINT = "own_faint"
     STATUS_INFLICTED = "status_inflicted"
     STATUS_RECEIVED = "status_received"
+    GOOD_TURN = "good_turn"
+    BAD_TURN = "bad_turn"
     BATTLE_WIN = "battle_win"
     BATTLE_LOSS = "battle_loss"
     CAPTURE_SUCCESS = "capture_success"
@@ -42,6 +44,8 @@ class RewardWeights:
     own_faint: float = -70.0
     status_inflicted: float = 12.0
     status_received: float = -15.0
+    good_turn: float = 35.0
+    bad_turn: float = -35.0
     battle_win: float = 100.0
     battle_loss: float = -120.0
     capture_success: float = 45.0
