@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
 import sys
 import time
-
+from ctypes import wintypes
 
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
@@ -113,11 +112,7 @@ def _send_scan(scan_code: int, *, key_up: bool, extended: bool) -> None:
 
 
 def press_key(key: str, seconds: float) -> None:
-    """Send one keyboard press with Windows scan codes.
-
-    Directional keys are marked as extended keys. This is more reliable for
-    melonDS than relying only on a high-level automation library.
-    """
+    """Send one keyboard press with Windows scan codes."""
     if sys.platform != "win32":
         raise RuntimeError("Native Windows input is only available on Windows")
 
