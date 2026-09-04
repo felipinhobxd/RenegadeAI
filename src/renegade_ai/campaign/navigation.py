@@ -29,12 +29,9 @@ class VisualNode:
 class VisualTopoNavigator:
     """Persistent pixel-only exploration graph for the overworld.
 
-    The DS camera is treated as a coarse visual state. Each directional action
-    creates an edge to the next observed state. The navigator first explores
-    untried directions and then follows known edges toward the nearest state
-    that still has an unexplored frontier. This is intentionally deterministic:
-    it avoids random wandering on a real save while still learning a reusable
-    topological map from normal play.
+    This remains the fallback when structured RAM is unavailable. Direction
+    choice is balanced globally so entering a new visual state no longer means
+    blindly trying UP and then RIGHT every time.
     """
 
     def __init__(self, path: str | Path = Path("data/campaign_map.json")) -> None:
@@ -54,7 +51,6 @@ class VisualTopoNavigator:
         step_y = max(1, height // 24)
         step_x = max(1, width // 32)
         sample = rgb[::step_y, ::step_x][:24, :32]
-        # Quantization makes the key resilient to small animation/color noise.
         quantized = (sample // 24).astype("uint8")
         return hashlib.blake2b(quantized.tobytes(), digest_size=10).hexdigest()
 
@@ -82,7 +78,7 @@ class VisualTopoNavigator:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": 1,
+            "version": 2,
             "total_steps": self.total_steps,
             "nodes": {key: asdict(node) for key, node in self.nodes.items()},
         }
@@ -118,6 +114,7 @@ class VisualTopoNavigator:
         self.total_steps += 1
 
         if next_key == state_key:
+            node.edges.pop(action_name, None)
             if action_name not in node.blocked:
                 node.blocked.append(action_name)
         else:
@@ -127,13 +124,31 @@ class VisualTopoNavigator:
             self.nodes.setdefault(next_key, VisualNode())
         self.save()
 
+    def _direction_totals(self) -> dict[str, int]:
+        totals = {action.value: 0 for action in _DIRECTION_ORDER}
+        for node in self.nodes.values():
+            for action in _DIRECTION_ORDER:
+                totals[action.value] += node.attempts.get(action.value, 0)
+        return totals
+
+    @staticmethod
+    def _rotation_rank(key: str, action: DSButton) -> int:
+        try:
+            rotation = int(key[:8], 16) % len(_DIRECTION_ORDER)
+        except ValueError:
+            rotation = 0
+        index = _DIRECTION_ORDER.index(action)
+        return (index - rotation) % len(_DIRECTION_ORDER)
+
     def _untried(self, key: str) -> list[DSButton]:
         node = self.nodes.setdefault(key, VisualNode())
         blocked = set(node.blocked)
         return [
             action
             for action in _DIRECTION_ORDER
-            if action.value not in node.attempts and action.value not in blocked
+            if action.value not in node.attempts
+            and action.value not in node.edges
+            and action.value not in blocked
         ]
 
     def _least_tried(self, key: str) -> DSButton:
@@ -141,20 +156,29 @@ class VisualTopoNavigator:
         candidates = [action for action in _DIRECTION_ORDER if action.value not in node.blocked]
         if not candidates:
             candidates = list(_DIRECTION_ORDER)
+        totals = self._direction_totals()
         return min(
             candidates,
-            key=lambda action: (node.attempts.get(action.value, 0), _DIRECTION_ORDER.index(action)),
+            key=lambda action: (
+                totals[action.value],
+                node.attempts.get(action.value, 0),
+                self._rotation_rank(key, action),
+            ),
         )
 
     def choose(self, state_key: str) -> DSButton:
         """Choose the next movement toward the nearest unexplored frontier."""
         direct = self._untried(state_key)
         if direct:
-            return direct[0]
+            totals = self._direction_totals()
+            return min(
+                direct,
+                key=lambda action: (
+                    totals[action.value],
+                    self._rotation_rank(state_key, action),
+                ),
+            )
 
-        # Breadth-first search over already discovered transitions. Store the
-        # first action from the current node so we can immediately move toward a
-        # frontier without reconstructing the whole path.
         queue: deque[tuple[str, DSButton | None]] = deque([(state_key, None)])
         seen = {state_key}
         while queue:
@@ -164,21 +188,21 @@ class VisualTopoNavigator:
             node = self.nodes.get(key)
             if node is None:
                 continue
+            edges: list[tuple[DSButton, str]] = []
             for raw_action, next_key in node.edges.items():
-                if next_key in seen:
+                if raw_action in node.blocked or next_key in seen:
                     continue
                 try:
                     action = DSButton.parse(raw_action)
                 except ValueError:
                     continue
-                if action not in _DIRECTION_ORDER:
-                    continue
+                if action in _DIRECTION_ORDER:
+                    edges.append((action, next_key))
+            edges.sort(key=lambda item: self.nodes.get(item[1], VisualNode()).visits)
+            for action, next_key in edges:
                 seen.add(next_key)
                 queue.append((next_key, first_action or action))
 
-        # All known frontiers are exhausted or currently disconnected. Re-test
-        # the least-used direction; scrolling cameras and NPCs can make a path
-        # that looked blocked earlier become traversable later.
         return self._least_tried(state_key)
 
     def stats(self) -> dict[str, int]:
