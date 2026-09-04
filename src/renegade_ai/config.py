@@ -6,7 +6,6 @@ from pathlib import Path
 
 from renegade_ai.actions import DSButton
 
-
 DEFAULT_KEYS: dict[DSButton, str] = {
     DSButton.A: "x",
     DSButton.B: "z",
