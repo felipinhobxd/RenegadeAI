@@ -41,3 +41,11 @@ class EmulatorAdapter(ABC):
         from the desktop.
         """
         raise NotImplementedError
+
+    def touch_bottom(self, x: float, y: float) -> None:
+        """Touch normalized coordinates on the DS bottom screen.
+
+        Coordinates use the inclusive logical range 0..1. Emulator backends that
+        cannot provide touch input may keep the default implementation.
+        """
+        raise NotImplementedError("This emulator adapter does not implement touch input")
