@@ -22,7 +22,6 @@ from renegade_ai.emulator.base import EmulatorAdapter
 from renegade_ai.perception.frame import DSScreens, split_ds_screens
 from renegade_ai.perception.scene import SceneObservation, SceneType, detect_scene
 
-
 # These are the screenshots that still unlock new autonomous actions. The scout
 # can collect them without selecting an item, switching Pokemon or using RUN.
 CALIBRATION_NEEDS = (
@@ -238,9 +237,11 @@ class AutoCalibrationScout:
             (BagCategory.BATTLE_ITEMS, "bag_battle_items_list"),
         )
         for category, target in targets:
-            if detect_scene(self._snapshot()[1]).scene != SceneType.BAG_MENU:
-                if not self._return_to(SceneType.BAG_MENU):
-                    return
+            if (
+                detect_scene(self._snapshot()[1]).scene != SceneType.BAG_MENU
+                and not self._return_to(SceneType.BAG_MENU)
+            ):
+                return
             touch_bag_category(self.emulator, category)
             frame, screens, observation = self._settle()
             self.save(
