@@ -14,13 +14,7 @@ _FIELD_LIKE = {SceneType.OVERWORLD, SceneType.UNKNOWN}
 
 
 class SmartCampaignAutopilot(CampaignAutopilot):
-    """Campaign director with balanced exploration, dialogue recovery and stuck captures.
-
-    The base campaign loop still owns battle handoff, milestones and normal
-    screenshot collection. This layer focuses on the long-horizon overworld
-    problems that used to make the agent walk mostly UP/RIGHT or keep pushing
-    into the same obstacle.
-    """
+    """Campaign director with balanced exploration, dialogue recovery and stuck captures."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -36,10 +30,6 @@ class SmartCampaignAutopilot(CampaignAutopilot):
         return hashlib.blake2b(payload.encode("utf-8"), digest_size=10).hexdigest()
 
     def _dialogue_lines(self, screens: DSScreens) -> list[str]:
-        # Platinum dialogue is normally rendered on the top DS screen while
-        # the lower screen can still look exactly like the overworld/Poketch.
-        # This is why relying only on the lower-screen scene classifier caused
-        # the old navigator to keep sending movement keys during conversations.
         lines = self._scan_text(screens.top)
         if _looks_like_text_interaction(lines):
             return lines
@@ -66,16 +56,12 @@ class SmartCampaignAutopilot(CampaignAutopilot):
             else:
                 self._last_dialogue_digest = digest
                 self._same_dialogue_presses = 0
-
             label = infer_semantic_label(lines)
             if label is not None:
                 self._record_milestone(label, lines)
         else:
             self._same_dialogue_presses += 1
 
-        # A is the normal safe dialogue/confirmation advance in Platinum. We
-        # deliberately do not mash A continuously; one press is issued and the
-        # next frame/state is observed before another decision.
         self.emulator.press(DSButton.A)
         time.sleep(max(0.12, self.poll_seconds))
         self._movement_since_interaction = 0
@@ -149,7 +135,7 @@ class SmartCampaignAutopilot(CampaignAutopilot):
 
         self.emulator.press(escape)
         time.sleep(max(0.12, self.poll_seconds))
-        frame, screens, observation = self._snapshot()
+        _frame, screens, observation = self._snapshot()
         after = self._structured_location()
         if after is not None:
             moved = self.structured_navigator.record_transition(before, escape, after)
@@ -208,9 +194,6 @@ class SmartCampaignAutopilot(CampaignAutopilot):
         self._no_progress_moves += 1
         self._blocked_streak += 1
 
-        # First interpret a failed movement as a possible dialogue/event lock.
-        # This catches mandatory NPC conversations whose bottom screen still
-        # resembles the overworld.
         advanced, lines = self._advance_dialogue(next_screens)
         if advanced:
             scene = detect_scene(
@@ -218,8 +201,6 @@ class SmartCampaignAutopilot(CampaignAutopilot):
             ).scene
             return 2, scene
 
-        # A persisted object directly in front is stronger evidence of an NPC,
-        # trainer, sign-like event or blocker than of a static wall.
         if target_has_object:
             advanced, lines = self._advance_dialogue(next_screens, force_once=True)
             if advanced:
@@ -228,9 +209,6 @@ class SmartCampaignAutopilot(CampaignAutopilot):
                 ).scene
                 return 2, scene
 
-        # Unknown blockers get one conservative interaction probe before being
-        # treated as a dead end. This helps signs/doors/events absent from the
-        # persisted MapObject table without causing continuous A-spam.
         if self._no_progress_moves == 2:
             advanced, lines = self._advance_dialogue(next_screens, force_once=True)
             if advanced:
@@ -280,7 +258,11 @@ class SmartCampaignAutopilot(CampaignAutopilot):
                 ).scene
             self.navigator.record_transition(state_key, action, next_key)
             if self._no_progress_moves == 2:
-                self._advance_dialogue(next_screens, force_once=True)
+                advanced, lines = self._advance_dialogue(next_screens, force_once=True)
+                if advanced:
+                    return 2, detect_scene(
+                        split_ds_screens(self.emulator.capture(), self.screen_layout)
+                    ).scene
             if self._no_progress_moves >= 3:
                 self._save_stuck_capture(
                     frame=frame,
