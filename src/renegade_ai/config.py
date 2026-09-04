@@ -37,6 +37,8 @@ class MelonDSConfig:
     window_title: str = "melonDS"
     focus_before_input: bool = True
     press_seconds: float = 0.06
+    direction_press_seconds: float = 0.14
+    input_backend: str = "auto"
     keys: dict[DSButton, str] = field(default_factory=lambda: dict(DEFAULT_KEYS))
 
 
@@ -80,6 +82,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         melon.get("focus_before_input", config.melonds.focus_before_input)
     )
     config.melonds.press_seconds = float(melon.get("press_seconds", config.melonds.press_seconds))
+    config.melonds.direction_press_seconds = float(
+        melon.get("direction_press_seconds", config.melonds.direction_press_seconds)
+    )
+    config.melonds.input_backend = str(
+        melon.get("input_backend", config.melonds.input_backend)
+    ).strip().lower()
+    if config.melonds.input_backend not in {"auto", "windows", "pyautogui"}:
+        raise ValueError("melonds.input_backend must be auto, windows or pyautogui")
 
     key_data = melon.get("keys", {})
     for button in DSButton:
