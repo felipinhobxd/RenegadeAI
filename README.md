@@ -15,18 +15,50 @@ melonDS
            |
            +--> RGB frame --> viewport crop --> calibrated scene perception
            |                                      |
-           +<-- DS buttons/touch <-- tactical planner
+           +<-- DS buttons/touch <-- campaign + battle planners
                                       |
                  OCR + exact scanned Pokemon state
                                       |
                       Renegade Dex + mechanics
                                       |
-                       strategy + learning memory
+                ASI-Evolve + campaign memory
 ```
 
 The stock-melonDS backend works through the normal desktop window. Windows keyboard input uses native scan codes, and the lower DS screen can also be controlled by normalized touch/click coordinates.
 
-## Current version: 0.3.0
+## Current version: 0.5.0
+
+### Zero-command autoplay after one-time setup
+
+Version 0.5 adds an unattended campaign director and a Windows startup watcher. On Windows, after pulling this branch, double-click once:
+
+```text
+scripts\install_autoplay.cmd
+```
+
+The installer updates/creates `.venv`, installs the vision dependencies and starts a per-user background watcher. After that, the intended workflow is simply:
+
+1. open melonDS;
+2. load Renegade Platinum;
+3. RenegadeAI detects the emulator and starts observing/playing automatically.
+
+The first run also builds the local Renegade knowledge cache automatically if it is missing, so `knowledge-sync` is no longer required before autoplay.
+
+The unattended director currently combines:
+
+- automatic screenshot/calibration collection and semantic naming;
+- OCR-based dialogue/milestone recognition;
+- persistent visual topological exploration of the overworld;
+- battle handoff to the mechanics-first smart battle planner;
+- ASI-Evolve rewards and persistent learning;
+- automatic reattachment when melonDS is restarted;
+- Hall of Fame/game-completion detection when the completion screen is recognized.
+
+Runtime log: `runs/autoplay.log`  
+Automatic captures: `captures/auto-calibration/`  
+Persistent visual exploration map: `data/campaign_map.json`
+
+This is an **experimental full-campaign foundation**, not a claim that the current pixel-only navigator can already guarantee a complete Renegade Platinum playthrough. The next reliability step is a read-only melonDS RAM/map backend plus A* objective navigation; see `docs/AUTOPLAY_RESEARCH.md`.
 
 ### Foundation
 
@@ -35,6 +67,8 @@ The stock-melonDS backend works through the normal desktop window. Windows keybo
 - [x] normalized lower-screen touch input
 - [x] SQLite experience history + Q-learning correction layer
 - [x] Windows GitHub Actions CI
+- [x] background autoplay watcher for melonDS
+- [x] automatic first-run knowledge bootstrap
 
 ### Real Renegade Platinum perception
 
@@ -53,10 +87,13 @@ Calibrated from real melonDS 1.1 Renegade Platinum captures.
 - [x] estimate opponent HP from its bar
 - [x] read battle status such as `PSN`
 - [x] read current move PP
+- [x] automatically save new/unknown screens for future calibration
+- [x] semantically name several milestones such as level-up/evolution/badge/game completion
 
 ### National Dex strategy layer
 
 - [x] sync Renegade-specific data for National Dex **1-493**
+- [x] automatically sync on first autonomous run if the cache is absent
 - [x] refuse an incomplete sync if any National Dex ID 1-493 is missing
 - [x] parse Renegade typing, abilities, base stats and learnsets
 - [x] generate a strategic profile for every synced Pokemon/form
@@ -78,18 +115,51 @@ Calibrated from real melonDS 1.1 Renegade Platinum captures.
 - [x] fixed-damage handling for moves such as Dragon Rage, Sonic Boom, Night Shade, Seismic Toss and Super Fang
 - [x] smart battle mode touches the selected move slot directly
 - [x] safely pauses on Bag/party/summary screens instead of blindly pressing A
+- [x] advance stable battle narration without repeated-A spam
 - [x] conservative emergency-switch scoring exists for a scanned multi-Pokemon party
-- [ ] autonomous switch execution (needs post-selection submenu calibration)
-- [ ] autonomous healing/status-item selection (needs actual item-list calibration)
+- [ ] autonomous switch execution after full real-game calibration
+- [ ] autonomous healing/status-item selection after full real-game calibration
 - [ ] autonomous Pokeball selection/capture policy
 - [ ] full trainer-team search / multi-turn lookahead
-- [ ] overworld route navigation
+
+### Campaign autonomy
+
+- [x] unattended campaign loop
+- [x] persistent visual-state graph
+- [x] deterministic frontier exploration rather than random movement
+- [x] dialogue/event interaction without continuous A spam
+- [x] automatic battle takeover and return to exploration
+- [x] automatic safe calibration from battle menus
+- [x] persistent ASI-Evolve campaign rewards
+- [x] background reattachment when melonDS appears/restarts
+- [ ] direct player map ID/X/Z/facing reader from melonDS RAM
+- [ ] collision/warp/object map extraction
+- [ ] A* overworld navigation
+- [ ] structured story/objective planner
+- [ ] reliable shops/TMs/evolution/resource planning
+- [ ] measured end-to-end Hall-of-Fame completion rate
 
 The generated build is a **general target build**, not a rigid rule. The live battle planner can override it based on the Pokemon actually in your save, its real stats/ability/item/moves/PP, the opponent, current HP and battle risk.
 
 ## Install / update on Windows
 
 Python 3.11+ is supported.
+
+### Recommended: unattended autoplay
+
+For an existing clone, update the branch and then double-click:
+
+```text
+scripts\install_autoplay.cmd
+```
+
+No administrator permission is required. The script installs a launcher in your own Windows Startup folder. To remove it later without deleting learning/captures, run:
+
+```text
+scripts\uninstall_autoplay.ps1
+```
+
+### Manual developer setup
 
 Fresh clone:
 
@@ -113,19 +183,19 @@ git pull
 python -m pip install -e ".[dev,vision]"
 ```
 
-## 1. Build the local Renegade knowledge base
+## Manual commands (optional diagnostics/development)
 
-Run once after installing:
+Autoplay does not require these commands after installation. They remain useful when debugging individual layers.
+
+### Build the local Renegade knowledge base manually
+
+Usually unnecessary now because autonomous mode bootstraps it automatically. To force a manual rebuild/cached sprites:
 
 ```powershell
 renegade-ai knowledge-sync --sprites
 ```
 
-This downloads the pinned Renegade Platinum data, parses every available Pokemon/form, verifies National Dex IDs 1-493, builds move data and generates strategy profiles. `--sprites` is optional and caches Platinum front/back sprites locally.
-
-Generated knowledge, sprites and your scanned save-state metadata stay under `data/` and are ignored by Git.
-
-## 2. Inspect any Pokemon's generated strategy
+### Inspect any Pokemon's generated strategy
 
 ```powershell
 renegade-ai strategy chimchar
@@ -133,11 +203,7 @@ renegade-ai strategy garchomp
 renegade-ai strategy rotom-heat
 ```
 
-The output includes role, offense style, preferred ability, Nature, EVs, target held item and ideal moves from the synced Renegade data.
-
-## 3. Verify scene recognition
-
-Open melonDS and stop on one of the known screens:
+### Verify scene recognition
 
 ```powershell
 renegade-ai observe
@@ -156,165 +222,86 @@ summary_moves
 unknown
 ```
 
-`summary_moves` and `move_menu` are intentionally separate. This prevents the AI from accidentally selecting a Summary-page move as if it were currently fighting.
+### Scan the party / exact Pokemon state
 
-## 4. Scan the party
-
-During a battle, open `POKEMON` so the six-slot party page is visible and run:
+During a battle, open `POKEMON` so the six-slot party page is visible:
 
 ```powershell
 renegade-ai party-scan
 ```
 
-This records occupied slots, Pokemon names, exact visible HP and status.
-
-Run it again after major party changes so the local state stays fresh.
-
-## 5. Scan exact Pokemon data
-
-Open a Pokemon's **Dados** page and run:
+Open a Pokemon's **Dados** or **Movimentos** page:
 
 ```powershell
 renegade-ai summary-scan
 ```
 
-It attempts to store:
-
-```text
-Pokemon
-level
-HP
-status
-ability
-held item
-Attack
-Defense
-Sp. Atk
-Sp. Def
-Speed
-```
-
-Then open the same Pokemon's **Movimentos** page and run the same command again:
-
-```powershell
-renegade-ai summary-scan
-```
-
-That stores the four moves and current/max PP.
-
-Inspect everything remembered locally:
+Inspect remembered state:
 
 ```powershell
 renegade-ai state-show
 ```
 
-For the first calibrated Chimchar example, the game showed values such as Lv.5, `14/20`, `PSN`, Iron Fist and Scratch/Leer/Ember. RenegadeAI is designed to read the actual values from each user's save instead of hard-coding those example values.
-
-## 6. Identify the current battle
-
-On a battle move-selection screen:
+### Identify or plan the current battle
 
 ```powershell
 renegade-ai identify
-```
-
-It reports the player/opponent match, levels, HP, status, moves, PP and OCR confidence. If OCR is uncertain, raw OCR text is exposed for debugging rather than silently inventing a Pokemon.
-
-## 7. Ask for a battle plan without pressing anything
-
-Keep `LUTAR` -> move selection visible:
-
-```powershell
 renegade-ai battle-plan
 ```
 
-This ranks recognized moves using:
+`battle-plan` ranks recognized moves but makes no game input.
 
-```text
-actual scanned stats when known
-+ level
-+ move power/category
-+ PP
-+ STAB
-+ type effectiveness
-+ accuracy
-+ damage-roll range
-+ selected ability/status/item mechanics
-+ current HP
-```
-
-This is the safest command to test first because it makes **no game input**.
-
-## 8. Run smart battle mode
-
-Only after `identify` and `battle-plan` look correct:
+### Run only the battle autopilot
 
 ```powershell
 renegade-ai battle-auto --smart --max-seconds 120
 ```
 
-Current loop:
+### Run ASI-Evolve battle mode manually
 
-```text
-capture
- -> classify screen
- -> enter LUTAR
- -> read Pokemon / HP / status / moves / PP
- -> merge exact cached Summary stats
- -> simulate and rank moves
- -> touch best move slot
- -> observe next state
+```powershell
+renegade-ai evolve battle --max-seconds 180
+renegade-ai evolve status
 ```
 
-If a Bag, party or Summary page appears unexpectedly, smart mode pauses safely instead of mashing buttons. Stop manually at any time with `Ctrl+C`.
+If the knowledge cache does not exist, it is now created automatically instead of raising the old `Renegade knowledge is not synced yet` error.
 
-## Useful diagnostics
+### Run the background watcher manually
 
-Check everything:
+Normally the startup installer handles this:
+
+```powershell
+renegade-ai-autoplay
+```
+
+### Useful diagnostics
 
 ```powershell
 renegade-ai doctor
-```
-
-Test D-pad input:
-
-```powershell
-renegade-ai press up --seconds 0.30
-renegade-ai press down --seconds 0.30
-renegade-ai press left --seconds 0.30
-renegade-ai press right --seconds 0.30
-```
-
-Capture cleaned screens:
-
-```powershell
 renegade-ai capture --split
-```
-
-Test a normalized lower-screen touch manually:
-
-```powershell
-renegade-ai touch 0.25 0.27
-```
-
-Initialize learning storage:
-
-```powershell
 renegade-ai db-init
 ```
 
-## Next calibration captures needed
+## Automatic calibration
 
-The main battle-command, Bag categories, party, Dados, Movimentos and damaged-HP states are now calibrated.
+The agent can capture its own calibration data. Separate manual screenshot collection is no longer the primary workflow.
 
-To enable safe autonomous **items, capture and switching**, the most useful next screenshots are:
+During unattended play it saves known and unknown states automatically. At battle-command screens it may safely explore reversible menus to capture missing Bag/party geometry without using an item, choosing a move, running away or confirming a switch.
 
-1. inside `RESTAURAR PS/PP`, with its actual item list visible;
-2. inside `POKEBOLAS`, with the Pokeball item list visible;
-3. inside `ESTADO E MEDICAMENTOS`, with its item list visible;
-4. after selecting a Pokemon from a party containing at least two usable Pokemon during battle, so the post-selection switch/menu flow is visible;
-5. later, the ordinary Start menu and a few overworld/map screens for route navigation.
+Each capture can include full/viewport/top/bottom PNGs plus JSON metadata and a shared manifest under:
+
+```text
+captures/auto-calibration/
+```
+
+Unknown screens are OCR-analyzed and receive semantic labels when confidence is sufficient; otherwise they enter the calibration inbox as `needed_unknown_###`.
 
 Do not commit ROMs, saves, BIOS/firmware or extracted copyrighted game assets.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/SOURCES.md`](docs/SOURCES.md).
+See:
+
+- `docs/ARCHITECTURE.md`
+- `docs/ASI_EVOLVE.md`
+- `docs/AUTO_CALIBRATION.md`
+- `docs/AUTOPLAY_RESEARCH.md`
+- `docs/SOURCES.md`
