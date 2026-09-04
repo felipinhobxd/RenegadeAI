@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
-from pathlib import Path
 import random
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -64,7 +64,7 @@ class QTable:
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str | Path, **defaults: float) -> "QTable":
+    def load(cls, path: str | Path, **defaults: float) -> QTable:
         path = Path(path)
         if not path.exists():
             return cls(**defaults)
