@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "mss>=10.0.0",
-  "numpy>=2.0.0",
+  "numpy>=2.0.0,<3.0.0",
   "Pillow>=11.0.0",
   "PyAutoGUI>=0.9.54",
   "PyGetWindow>=0.0.9",
@@ -18,7 +18,8 @@ dependencies = [
 
 [project.optional-dependencies]
 vision = [
-  "rapidocr-onnxruntime>=1.4.4",
+  "rapidocr>=3.8.1",
+  "onnxruntime>=1.29.0",
 ]
 dev = [
   "pytest>=8.0.0",
