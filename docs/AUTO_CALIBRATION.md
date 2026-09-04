@@ -51,7 +51,7 @@ captures/auto-calibration/
 
 The whole `captures/` directory is ignored by Git.
 
-## Passive discovery
+## Passive semantic discovery
 
 The scout can also watch normal gameplay and automatically save unknown/new scene transitions:
 
@@ -59,7 +59,23 @@ The scout can also watch normal gameplay and automatically save unknown/new scen
 renegade-ai scout --passive-only --watch-seconds 300
 ```
 
-Unknown screens are named automatically as:
+For an unknown screen it first runs OCR and tries to assign a useful semantic name. Current high-confidence semantic labels include:
+
+```text
+bag_restore_list
+bag_pokeballs_list
+bag_status_list
+bag_battle_items_list
+party_slot_action_menu
+capture_success
+level_up
+evolution
+badge_received
+boss_victory
+game_complete
+```
+
+If OCR cannot safely identify the screen, it falls back to a calibration-inbox name:
 
 ```text
 needed_unknown_001
@@ -67,7 +83,9 @@ needed_unknown_002
 ...
 ```
 
-This creates a calibration inbox for later scene detectors such as item lists, switch confirmation, evolution, badge screens, trainer/boss victory and Hall of Fame/game completion.
+This means new screens are preserved even when RenegadeAI does not understand them yet, while recognizable screens receive names based on what is actually visible instead of a manual filename.
+
+Recognized campaign milestones are also connected to ASI-Evolve. Capture, level-up, evolution, badge, boss-victory and Hall of Fame/game-completion messages can create persistent rewards. Repeated frames of the same visible message are deduplicated; game completion is rewarded only once per learning profile.
 
 You can combine active menu exploration with passive watching:
 
