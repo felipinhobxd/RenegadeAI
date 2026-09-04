@@ -13,9 +13,9 @@ from renegade_ai.learning.battle_memory import BattleAdaptiveMemory
 from renegade_ai.learning.evolve import ASIEvolveEngine, RewardKind
 from renegade_ai.perception.frame import DSScreens, split_ds_screens
 from renegade_ai.perception.ocr import OCRScanner
+from renegade_ai.perception.scene import SceneObservation, SceneType, detect_scene
 from renegade_ai.perception.scout import AutoCalibrationScout
 from renegade_ai.perception.semantic import infer_semantic_label, normalize_ui_text
-from renegade_ai.perception.scene import SceneObservation, SceneType, detect_scene
 
 if TYPE_CHECKING:
     from renegade_ai.emulator.base import EmulatorAdapter
