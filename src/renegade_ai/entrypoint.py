@@ -5,6 +5,11 @@ import sys
 
 def main() -> None:
     args = sys.argv[1:]
+    if args and args[0] == "autoplay":
+        from renegade_ai.autoplay import main as autoplay_main
+
+        autoplay_main(args[1:])
+        return
     if args and args[0] == "scout":
         from renegade_ai.scout_cli import main as scout_main
 
