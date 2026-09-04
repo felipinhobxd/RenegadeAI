@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 
 from renegade_ai.learning.qtable import QTable
 
@@ -71,7 +71,7 @@ class BattleAgent:
         accuracy = max(0.0, min(1.0, move.accuracy))
         damage = max(0.0, move.damage_fraction) * max(0.0, move.effectiveness)
         expected = damage * accuracy
-        ko_bonus = 1.2 if damage >= opponent_hp and opponent_hp > 0 else 0.0
+        ko_bonus = 1.2 if damage >= opponent_hp > 0 else 0.0
         priority_bonus = 0.08 * max(0, move.priority)
         low_pp_penalty = 0.15 if move.pp_fraction <= 0.15 else 0.0
         return expected + ko_bonus + priority_bonus - low_pp_penalty
