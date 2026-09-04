@@ -109,8 +109,8 @@ def patch_melonds_toml(path: str | Path) -> bool:
     original = path.read_text(encoding="utf-8")
     updated = original
     updated = _upsert_table(updated, "JIT", {"Enable": "false"})
-    updated = _upsert_table(updated, "Gdb", {"Enabled": "true"})
     for prefix in ("Gdb", "Instance0.Gdb"):
+        updated = _upsert_table(updated, prefix, {"Enabled": "true"})
         updated = _upsert_table(
             updated,
             f"{prefix}.ARM9",
