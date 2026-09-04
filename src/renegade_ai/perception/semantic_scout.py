@@ -7,10 +7,9 @@ from typing import Any
 
 from renegade_ai.learning.evolve import ASIEvolveEngine, RewardKind
 from renegade_ai.perception.ocr import OCRScanner
-from renegade_ai.perception.scout import AutoCalibrationScout
+from renegade_ai.perception.scout import AutoCalibrationScout, CaptureRecord
 from renegade_ai.perception.semantic import infer_semantic_label, normalize_ui_text
 from renegade_ai.perception.scene import SceneType
-
 
 _SCENE_LABELS = {
     SceneType.OVERWORLD: "overworld",
@@ -56,9 +55,9 @@ class SemanticAutoCalibrationScout(AutoCalibrationScout):
         self.reward_engine = reward_engine or ASIEvolveEngine()
 
     def _semantic_lines(self, image: Any) -> list[str]:
-        if self._scanner is None:
-            self._scanner = OCRScanner(scale=3)
         try:
+            if self._scanner is None:
+                self._scanner = OCRScanner(scale=3)
             return [line.text for line in self._scanner.scan(image) if line.confidence >= 0.42]
         except RuntimeError:
             # Active screenshot collection still works without vision extras.
@@ -79,7 +78,12 @@ class SemanticAutoCalibrationScout(AutoCalibrationScout):
             },
         )
 
-    def watch(self, seconds: float = 60.0, *, poll_seconds: float = 0.25):
+    def watch(
+        self,
+        seconds: float = 60.0,
+        *,
+        poll_seconds: float = 0.25,
+    ) -> list[CaptureRecord]:
         """Watch gameplay, semantically name unknown screens and reward milestones."""
         deadline = time.monotonic() + max(1.0, float(seconds))
         last_scene: SceneType | None = None
@@ -91,8 +95,12 @@ class SemanticAutoCalibrationScout(AutoCalibrationScout):
             image = screens.viewport if screens.viewport is not None else frame
             # A compact visual signature avoids OCR on every unchanged frame.
             shape = getattr(image, "shape", ())
-            raw = memoryview(image).tobytes() if hasattr(image, "tobytes") else bytes(str(shape), "utf-8")
-            signature = hashlib.blake2b(raw[:: max(1, len(raw) // 4096)], digest_size=8).hexdigest()
+            if hasattr(image, "tobytes"):
+                raw = memoryview(image).tobytes()
+            else:
+                raw = bytes(str(shape), "utf-8")
+            stride = max(1, len(raw) // 4096)
+            signature = hashlib.blake2b(raw[::stride], digest_size=8).hexdigest()
             scene_changed = observation.scene != last_scene
             visually_changed = signature != last_signature
 
