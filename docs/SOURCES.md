@@ -1,30 +1,31 @@
-# External data sources
+# Sources
 
-RenegadeAI does not ship a ROM, BIOS/firmware, save files or an extracted game asset pack.
+RenegadeAI keeps downloaded/generated knowledge out of Git and records the public projects used as technical references.
 
-## Renegade Platinum game knowledge
+## Renegade Platinum data
 
-The runtime `knowledge-sync` command builds its local structured battle knowledge from the community Renegade Platinum wiki repository:
+The knowledge sync downloads public Renegade Platinum documentation at runtime and pins the external revision used to generate local data. Generated Pokemon/move/strategy JSON and sprite caches live under `data/` and are ignored by Git.
 
-- Repository: `zhenga8533/renegade-platinum-wiki`
-- Pinned revision: `7e8956b8f138deaece1ed9c3ee7be22dc1437438`
-- Parsed area: `docs/pokedex/pokemon/*.md`
+The repository does **not** include a Renegade Platinum ROM, a Pokemon Platinum ROM, BIOS/firmware, save files, savestates or extracted copyrighted game assets.
 
-The revision is deliberately pinned. RenegadeAI validates that the generated dataset contains all National Dex IDs 1 through 493 before replacing the local knowledge files.
+## Pokemon / emulator engineering references
 
-The parser extracts the Renegade-specific values exposed by those pages, including current typing, abilities, base stats, and Level-Up / TM-HM / Tutor / Egg move data. Generated strategy profiles are RenegadeAI output; they are not copied strategy text from the wiki.
+- melonDS — https://github.com/melonDS-emu/melonDS
+- Pokemon Platinum decompilation — https://github.com/pret/pokeplatinum
+- Platinum Lua/QoL memory tooling — https://github.com/hzla/Pokemon-Lua
 
-Generated files live under `data/knowledge/` and are ignored by Git.
+These are useful for the planned read-only structured-state backend: map ID, player coordinates, facing, collisions/warps/objects and objective state where reliable symbols/structures can be identified.
 
-## Optional sprite cache
+## Autonomous Pokemon-agent references
 
-`renegade-ai knowledge-sync --sprites` optionally caches Generation IV Platinum front/back sprites from the PokeAPI sprites repository:
+- Continual Harness / PokeAgent — https://github.com/sethkarten/continual-harness
+- NousResearch pokemon-agent — https://github.com/NousResearch/pokemon-agent
+- Claude Plays Pokemon starter — https://github.com/davidhershey/ClaudePlaysPokemonStarter
+- Extended LLM Pokemon scaffold — https://github.com/cicero225/llm_pokemon_scaffold
+- GeminiPlaysPokemonLive — https://github.com/nichosta/GeminiPlaysPokemonLive
+- PokemonRedExperiments — https://github.com/PWhiddy/PokemonRedExperiments
+- Playing Pokemon Red via Deep Reinforcement Learning — https://arxiv.org/abs/2502.19920
 
-- Repository: `PokeAPI/sprites`
-- Path family: `sprites/pokemon/versions/generation-iv/platinum/`
+These references informed architecture choices, not copied game assets. The recurring lesson is that long-horizon Pokemon completion works better as a hierarchy of structured state, objectives, pathfinding, memory, battle reasoning and recovery than as a single screenshot-to-button policy or pure reward maximizer.
 
-The sprite cache is stored under `data/sprites/platinum/`, is ignored by Git, and is intended as a visual-recognition fallback. Battle HUD text recognition is preferred when it is reliable because the game itself displays the species name.
-
-## Source policy
-
-External data is downloaded on the user's machine. Generated caches are reproducible and are not committed to this repository. RenegadeAI's own planner, type engine, strategy generation, perception code and learning code live in this repository.
+See `AUTOPLAY_RESEARCH.md` for the detailed design takeaways.
