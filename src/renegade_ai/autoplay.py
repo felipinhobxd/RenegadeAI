@@ -7,8 +7,12 @@ from datetime import datetime
 from pathlib import Path
 
 from renegade_ai.cli import make_adapter
+from renegade_ai.config import AppConfig, load_config
 from renegade_ai.knowledge.bootstrap import ensure_renegade_dex
 from renegade_ai.learning.evolve import ASIEvolveEngine
+from renegade_ai.memory.gdb import GDBRemoteClient, GDBRemoteError
+from renegade_ai.memory.melonds_config import configure_melonds_debugger
+from renegade_ai.memory.platinum import PlatinumMemoryReader
 
 
 def _log(message: str, *, path: Path = Path("runs/autoplay.log")) -> None:
@@ -42,6 +46,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _try_auto_configure_debugger(config: AppConfig) -> None:
+    if not config.memory.enabled or not config.memory.auto_configure_melonds:
+        return
+    result = configure_melonds_debugger()
+    if result.changed:
+        joined = ", ".join(str(path) for path in result.changed)
+        _log(
+            "Updated melonDS for structured read-only ARM9 state "
+            f"(GDB enabled, JIT disabled): {joined}. A melonDS restart is required."
+        )
+
+
 def _wait_for_melonds(config_path: Path | None, wait_seconds: float):
     config, adapter = make_adapter(config_path)
     announced = False
@@ -57,6 +73,37 @@ def _wait_for_melonds(config_path: Path | None, wait_seconds: float):
             time.sleep(max(0.5, wait_seconds))
 
 
+def _connect_structured_memory(
+    config: AppConfig,
+) -> tuple[GDBRemoteClient | None, PlatinumMemoryReader | None]:
+    if not config.memory.enabled:
+        return None, None
+    client = GDBRemoteClient(
+        config.memory.host,
+        config.memory.arm9_port,
+        timeout=config.memory.timeout,
+    )
+    try:
+        client.connect()
+        reader = PlatinumMemoryReader(client, reporter=_log)
+        reader.probe()
+        location = reader.read_location()
+    except (OSError, GDBRemoteError, ValueError) as exc:
+        client.close()
+        _log(
+            "Structured ARM9 state is not available in this melonDS session; "
+            f"vision/OCR fallback remains active. Reason: {exc}"
+        )
+        return None, None
+
+    _log(
+        "Structured ARM9 read-only mode active: "
+        f"{location.map_name}#{location.map_header_id} "
+        f"({location.x},{location.z}), facing={location.facing}."
+    )
+    return client, reader
+
+
 def run_daemon(
     *,
     config_path: Path | None = None,
@@ -64,12 +111,18 @@ def run_daemon(
     poll_seconds: float = 0.18,
     once: bool = False,
 ) -> int:
+    initial_config = load_config(config_path)
+    _try_auto_configure_debugger(initial_config)
+
     while True:
         config, adapter = _wait_for_melonds(config_path, wait_seconds)
+        _try_auto_configure_debugger(config)
+        memory_client: GDBRemoteClient | None = None
         try:
             dex = ensure_renegade_dex(reporter=_log)
             from renegade_ai.campaign.runtime import CampaignAutopilot
 
+            memory_client, structured_reader = _connect_structured_memory(config)
             evolve = ASIEvolveEngine(
                 qtable_path=config.learning.qtable.with_name("evolve_qtable.json"),
             )
@@ -77,12 +130,19 @@ def run_daemon(
                 adapter,
                 config.capture.screen_layout,
                 dex=dex,
+                structured_reader=structured_reader,
                 evolve_engine=evolve,
                 poll_seconds=poll_seconds,
             )
+            mode = (
+                "structured RAM + vision"
+                if structured_reader is not None
+                else "vision/OCR fallback"
+            )
             _log(
-                "Autonomous campaign started: screenshots/scouting, exploration, dialogue "
-                "handling, battles and ASI-Evolve are active."
+                "Autonomous campaign started: "
+                f"navigation={mode}; screenshots/scouting, dialogue handling, "
+                "battles and ASI-Evolve are active."
             )
             result = campaign.run()
             _log(
@@ -96,12 +156,16 @@ def run_daemon(
         except KeyboardInterrupt:
             _log("Autoplay stopped by user.")
             return 130
-        except Exception as exc:  # noqa: BLE001 - daemon must survive session-level failures.
+        except Exception as exc:  # noqa: BLE001 - daemon must survive session failures.
             _log(f"Autoplay session error: {type(exc).__name__}: {exc}")
             time.sleep(max(2.0, wait_seconds))
+        finally:
+            if memory_client is not None:
+                memory_client.close()
 
         if once:
             return 0
+        _try_auto_configure_debugger(load_config(config_path))
         _log("melonDS session ended or failed; waiting for the game to appear again.")
         time.sleep(max(0.5, wait_seconds))
 

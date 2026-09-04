@@ -42,6 +42,15 @@ class MelonDSConfig:
 
 
 @dataclass(slots=True)
+class MemoryConfig:
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    arm9_port: int = 3333
+    timeout: float = 1.5
+    auto_configure_melonds: bool = True
+
+
+@dataclass(slots=True)
 class LearningConfig:
     database: Path = Path("data/experience.sqlite3")
     qtable: Path = Path("data/qtable.json")
@@ -54,6 +63,7 @@ class LearningConfig:
 class AppConfig:
     melonds: MelonDSConfig = field(default_factory=MelonDSConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
 
 
@@ -74,6 +84,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
 
     melon = raw.get("melonds", {})
     capture = raw.get("capture", {})
+    memory = raw.get("memory", {})
     learning = raw.get("learning", {})
 
     config.melonds.window_title = str(melon.get("window_title", config.melonds.window_title))
@@ -99,6 +110,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         if name in capture:
             setattr(config.capture, name, int(capture[name]))
     config.capture.screen_layout = str(capture.get("screen_layout", config.capture.screen_layout))
+
+    config.memory.enabled = bool(memory.get("enabled", config.memory.enabled))
+    config.memory.host = str(memory.get("host", config.memory.host))
+    config.memory.arm9_port = int(memory.get("arm9_port", config.memory.arm9_port))
+    config.memory.timeout = float(memory.get("timeout", config.memory.timeout))
+    config.memory.auto_configure_melonds = bool(
+        memory.get("auto_configure_melonds", config.memory.auto_configure_melonds)
+    )
 
     config.learning.database = Path(learning.get("database", config.learning.database))
     config.learning.qtable = Path(learning.get("qtable", config.learning.qtable))

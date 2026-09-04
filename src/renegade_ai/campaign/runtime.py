@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING, Any
 from renegade_ai.actions import DSButton
 from renegade_ai.agent.runtime import BattleAutopilot
 from renegade_ai.campaign.navigation import VisualTopoNavigator
+from renegade_ai.campaign.structured_navigation import StructuredGridNavigator
 from renegade_ai.learning.battle_memory import BattleAdaptiveMemory
 from renegade_ai.learning.evolve import ASIEvolveEngine, RewardKind
+from renegade_ai.memory.gdb import GDBRemoteError
 from renegade_ai.perception.frame import DSScreens, split_ds_screens
 from renegade_ai.perception.ocr import OCRScanner
 from renegade_ai.perception.scene import SceneObservation, SceneType, detect_scene
@@ -20,6 +22,7 @@ from renegade_ai.perception.semantic import infer_semantic_label, normalize_ui_t
 if TYPE_CHECKING:
     from renegade_ai.emulator.base import EmulatorAdapter
     from renegade_ai.knowledge.dex import RenegadeDex
+    from renegade_ai.memory.platinum import PlatinumMemoryReader, StructuredLocation
 
 
 _SCENE_CAPTURE_NAMES = {
@@ -68,7 +71,6 @@ def _visual_signature(image: Any) -> str:
 
 
 def _looks_like_text_interaction(lines: list[str]) -> bool:
-    """Conservatively decide when A is likely to advance text/menu state."""
     normalized = " ".join(normalize_ui_text(line) for line in lines if line).strip()
     if not normalized:
         return False
@@ -76,36 +78,15 @@ def _looks_like_text_interaction(lines: list[str]) -> bool:
     if len(words) >= 4:
         return True
     keywords = (
-        "continue",
-        "continuar",
-        "sim",
-        "yes",
-        "nao",
-        "no",
-        "pokemon",
-        "recebeu",
-        "obteve",
-        "parabens",
-        "congratulations",
-        "level",
-        "nivel",
-        "evoluiu",
-        "evolved",
+        "continue", "continuar", "sim", "yes", "nao", "no", "pokemon",
+        "recebeu", "obteve", "parabens", "congratulations", "level",
+        "nivel", "evoluiu", "evolved",
     )
     return any(keyword in normalized for keyword in keywords)
 
 
 class CampaignAutopilot:
-    """Unattended director that combines battle AI, scouting and exploration.
-
-    This layer is intentionally emulator-facing rather than a scripted route.
-    It continuously observes the real save, lets the battle planner take over
-    battles, automatically collects missing calibration screens, advances text,
-    and builds a persistent visual graph while exploring the overworld.
-
-    The visual navigator is a baseline for long-horizon autonomy. Future direct
-    RAM/map readers can replace it without changing this director.
-    """
+    """Hybrid full-campaign director using structured RAM plus vision fallback."""
 
     def __init__(
         self,
@@ -114,6 +95,8 @@ class CampaignAutopilot:
         *,
         dex: RenegadeDex,
         navigator: VisualTopoNavigator | None = None,
+        structured_reader: PlatinumMemoryReader | None = None,
+        structured_navigator: StructuredGridNavigator | None = None,
         evolve_engine: ASIEvolveEngine | None = None,
         capture_root: str | Path = Path("captures/auto-calibration"),
         poll_seconds: float = 0.18,
@@ -125,6 +108,8 @@ class CampaignAutopilot:
         self.screen_layout = screen_layout
         self.poll_seconds = max(0.08, float(poll_seconds))
         self.navigator = navigator or VisualTopoNavigator()
+        self.structured_reader = structured_reader
+        self.structured_navigator = structured_navigator or StructuredGridNavigator()
         self.evolve = evolve_engine or ASIEvolveEngine()
         self.scout = AutoCalibrationScout(
             emulator,
@@ -139,6 +124,11 @@ class CampaignAutopilot:
         self._milestone_tokens: set[str] = set()
         self._movement_since_interaction = 0
         self._blocked_streak = 0
+        self._structured_failures = 0
+        self._last_structured_location: StructuredLocation | None = None
+        self._last_badge_mask: int | None = None
+        self._last_story_cleared: bool | None = None
+        self._last_progress_poll = 0.0
 
         memory = BattleAdaptiveMemory(evolve_engine=self.evolve)
         self.battle = BattleAutopilot(
@@ -149,6 +139,10 @@ class CampaignAutopilot:
             state_store=RuntimeStateStore(),
             adaptive_memory=memory,
         )
+
+    @property
+    def structured_navigation_active(self) -> bool:
+        return self.structured_reader is not None and self._structured_failures < 4
 
     def _snapshot(self) -> tuple[Any, DSScreens, SceneObservation]:
         frame = self.emulator.capture()
@@ -162,6 +156,75 @@ class CampaignAutopilot:
             return [line.text for line in self._scanner.scan(image) if line.confidence >= 0.42]
         except RuntimeError:
             return []
+
+    def _structured_location(self) -> StructuredLocation | None:
+        if not self.structured_navigation_active or self.structured_reader is None:
+            return None
+        try:
+            location = self.structured_reader.read_location()
+        except (OSError, GDBRemoteError, ValueError):
+            self._structured_failures += 1
+            return None
+        self._structured_failures = 0
+        self._last_structured_location = location
+        return location
+
+    def _record_map_discovery(self, location: StructuredLocation) -> None:
+        _key, is_new_map = self.structured_navigator.observe(location)
+        if not is_new_map:
+            return
+        self.evolve.record(
+            RewardKind.OBJECTIVE_PROGRESS,
+            magnitude=0.15,
+            token=f"structured-map:{location.map_header_id}",
+            metadata={
+                "source": "structured_ram",
+                "map_header_id": location.map_header_id,
+                "map_name": location.map_name,
+                "x": location.x,
+                "z": location.z,
+            },
+        )
+
+    def _poll_structured_progress(self) -> bool:
+        if not self.structured_navigation_active or self.structured_reader is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_progress_poll < 2.0:
+            return bool(self._last_story_cleared)
+        self._last_progress_poll = now
+        try:
+            progress = self.structured_reader.read_progress()
+        except (OSError, GDBRemoteError, ValueError):
+            self._structured_failures += 1
+            return False
+
+        previous_badges = self._last_badge_mask
+        previous_cleared = self._last_story_cleared
+        self._last_badge_mask = progress.badge_mask
+        self._last_story_cleared = progress.main_story_cleared
+
+        if previous_badges is not None:
+            gained = progress.badge_mask & ~previous_badges
+            for badge_index in range(8):
+                if gained & (1 << badge_index):
+                    self.evolve.record(
+                        RewardKind.BADGE,
+                        token=f"ram-badge:{badge_index}",
+                        metadata={
+                            "source": "structured_ram",
+                            "badge_index": badge_index,
+                            "badge_count": progress.badge_count,
+                        },
+                    )
+
+        if previous_cleared is False and progress.main_story_cleared:
+            self.evolve.record(
+                RewardKind.GAME_COMPLETE,
+                token="ram-main-story-cleared",
+                metadata={"source": "structured_ram"},
+            )
+        return progress.main_story_cleared
 
     def _record_milestone(self, label: str, lines: list[str]) -> float:
         kind = _MILESTONES.get(label)
@@ -199,6 +262,7 @@ class CampaignAutopilot:
 
         self._last_capture_signature = signature
         self._last_capture_scene = observation.scene
+        structured = self._last_structured_location
         if semantic_label is not None:
             target = semantic_label
         elif observation.scene in _SCENE_CAPTURE_NAMES:
@@ -210,6 +274,11 @@ class CampaignAutopilot:
             target = observation.scene.value
 
         note = "Autonomous campaign capture."
+        if structured is not None:
+            note += (
+                f" RAM: {structured.map_name}#{structured.map_header_id} "
+                f"({structured.x},{structured.z}) facing={structured.facing}."
+            )
         if lines:
             note += f" OCR: {' | '.join(lines[:20])}"
         record = self.scout.save(
@@ -221,7 +290,48 @@ class CampaignAutopilot:
         )
         return int(record is not None)
 
-    def _explore_once(self, screens: DSScreens) -> tuple[int, SceneType]:
+    def _maybe_interact_after_movement(self) -> int:
+        self._movement_since_interaction += 1
+        if self._blocked_streak < 2 and self._movement_since_interaction < 8:
+            return 0
+        self.emulator.press(DSButton.A)
+        self._movement_since_interaction = 0
+        self._blocked_streak = 0
+        time.sleep(max(0.10, self.poll_seconds))
+        return 1
+
+    def _explore_structured_once(
+        self,
+        before: StructuredLocation,
+    ) -> tuple[int, SceneType]:
+        self._record_map_discovery(before)
+        source_key = self.structured_navigator.key(before)
+        action = self.structured_navigator.choose(source_key)
+        self.emulator.press(action)
+        time.sleep(max(0.12, self.poll_seconds))
+        _frame, _next_screens, next_observation = self._snapshot()
+
+        if next_observation.scene not in {SceneType.OVERWORLD, SceneType.UNKNOWN}:
+            self._blocked_streak = 0
+            return 1, next_observation.scene
+
+        after = self._structured_location()
+        if after is None:
+            self._blocked_streak = 0
+            return 1, next_observation.scene
+
+        moved = self.structured_navigator.record_transition(before, action, after)
+        self._record_map_discovery(after)
+        self._blocked_streak = 0 if moved else self._blocked_streak + 1
+        actions = 1 + self._maybe_interact_after_movement()
+        if actions > 1:
+            scene = detect_scene(
+                split_ds_screens(self.emulator.capture(), self.screen_layout)
+            ).scene
+            return actions, scene
+        return actions, next_observation.scene
+
+    def _explore_visual_once(self, screens: DSScreens) -> tuple[int, SceneType]:
         state_key = self.navigator.observe(screens.top)
         action = self.navigator.choose(state_key)
         self.emulator.press(action)
@@ -232,27 +342,25 @@ class CampaignAutopilot:
         if next_is_field_like:
             next_key = self.navigator.observe(next_screens.top)
             self.navigator.record_transition(state_key, action, next_key)
-            if next_key == state_key:
-                self._blocked_streak += 1
-            else:
-                self._blocked_streak = 0
+            self._blocked_streak = self._blocked_streak + 1 if next_key == state_key else 0
         else:
-            # A battle/menu transition is useful progress, not a blocked edge.
             next_key = self.navigator.fingerprint(next_screens.top)
             self.navigator.record_transition(state_key, action, next_key)
             self._blocked_streak = 0
 
-        self._movement_since_interaction += 1
-        if self._blocked_streak >= 2 or self._movement_since_interaction >= 8:
-            # Interacting after reaching an obstacle/frontier is far safer than
-            # spamming A continuously and is enough to trigger NPCs, signs,
-            # doors/events and many story conversations encountered in travel.
-            self.emulator.press(DSButton.A)
-            self._movement_since_interaction = 0
-            self._blocked_streak = 0
-            time.sleep(max(0.10, self.poll_seconds))
-            return 2, detect_scene(split_ds_screens(self.emulator.capture(), self.screen_layout)).scene
-        return 1, next_observation.scene
+        actions = 1 + self._maybe_interact_after_movement()
+        if actions > 1:
+            scene = detect_scene(
+                split_ds_screens(self.emulator.capture(), self.screen_layout)
+            ).scene
+            return actions, scene
+        return actions, next_observation.scene
+
+    def _explore_once(self, screens: DSScreens) -> tuple[int, SceneType]:
+        structured = self._structured_location()
+        if structured is not None:
+            return self._explore_structured_once(structured)
+        return self._explore_visual_once(screens)
 
     def _run_safe_calibration_if_needed(self) -> int:
         missing_before = set(self.scout.missing())
@@ -274,8 +382,6 @@ class CampaignAutopilot:
             try:
                 frame, screens, observation = self._snapshot()
             except RuntimeError as exc:
-                # A closed/minimized emulator should end this session cleanly;
-                # the outer autoplay daemon will wait for melonDS to return.
                 return CampaignRunResult(
                     completed=False,
                     steps=steps,
@@ -290,6 +396,23 @@ class CampaignAutopilot:
             scene = observation.scene
             last_scene = scene
             image = screens.viewport if screens.viewport is not None else frame
+
+            if self._poll_structured_progress():
+                return CampaignRunResult(
+                    completed=True,
+                    steps=steps,
+                    battles=battles,
+                    captures=captures,
+                    elapsed_seconds=time.monotonic() - started,
+                    last_scene=scene,
+                    last_label="game_complete_ram",
+                    reason="Main-story-cleared flag detected from read-only RAM",
+                )
+
+            if scene in {SceneType.OVERWORLD, SceneType.UNKNOWN}:
+                structured = self._structured_location()
+                if structured is not None:
+                    self._record_map_discovery(structured)
 
             lines: list[str] = []
             semantic_label: str | None = None
@@ -320,8 +443,6 @@ class CampaignAutopilot:
                     )
 
             if scene in {SceneType.BATTLE_COMMAND, SceneType.MOVE_MENU}:
-                # The first real battle doubles as automatic calibration. No
-                # separate scout command is needed.
                 if scene == SceneType.BATTLE_COMMAND:
                     captures += self._run_safe_calibration_if_needed()
                 result = self.battle.run(max_seconds=600.0, poll_seconds=self.poll_seconds)
@@ -336,16 +457,12 @@ class CampaignAutopilot:
                 SceneType.SUMMARY_STATS,
                 SceneType.SUMMARY_MOVES,
             }:
-                # If a menu was opened accidentally while exploring, retreat one
-                # level instead of selecting an unknown item/switch operation.
                 self.emulator.press(DSButton.B)
                 steps += 1
                 time.sleep(self.poll_seconds)
                 continue
 
             if scene == SceneType.UNKNOWN and _looks_like_text_interaction(lines):
-                # One press per newly observed frame prevents the classic
-                # repeated-A/NPC dialogue loop seen in other Pokemon agents.
                 self.emulator.press(DSButton.A)
                 steps += 1
                 time.sleep(max(0.12, self.poll_seconds))

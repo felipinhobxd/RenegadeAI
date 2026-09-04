@@ -10,6 +10,11 @@ def main() -> None:
 
         autoplay_main(args[1:])
         return
+    if args and args[0] == "memory":
+        from renegade_ai.memory_cli import main as memory_main
+
+        memory_main(args[1:])
+        return
     if args and args[0] == "scout":
         from renegade_ai.scout_cli import main as scout_main
 
@@ -23,7 +28,7 @@ def main() -> None:
 
     from renegade_ai.cli import main as legacy_main
 
-    legacy_main()
+    legacy_main(args)
 
 
 if __name__ == "__main__":
