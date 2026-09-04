@@ -12,6 +12,9 @@ DEFAULT_KNOWLEDGE_DIR = Path("data/knowledge")
 
 
 def normalize_name(value: str) -> str:
+    # Preserve gender before stripping punctuation: otherwise Nidoran♀ and
+    # Nidoran♂ both collapse to "nidoran" and one silently overwrites the other.
+    value = value.replace("♀", " female ").replace("♂", " male ")
     value = unicodedata.normalize("NFKD", value)
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]+", "", value.lower())
