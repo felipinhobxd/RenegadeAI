@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "renegade-ai"
+version = "0.1.0"
+description = "Autonomous Pokemon Renegade Platinum agent for melonDS"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mss>=10.0.0",
+  "numpy>=2.0.0",
+  "Pillow>=11.0.0",
+  "PyAutoGUI>=0.9.54",
+  "PyGetWindow>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.9.0",
+]
+
+[project.scripts]
+renegade-ai = "renegade_ai.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

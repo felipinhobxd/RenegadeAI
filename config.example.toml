@@ -1,0 +1,36 @@
+[melonds]
+window_title = "melonDS"
+focus_before_input = true
+press_seconds = 0.06
+
+# These are common keyboard bindings, but melonDS lets you remap every key.
+# Make these match Config > Input and hotkeys > DS keypad in your installation.
+[melonds.keys]
+a = "x"
+b = "z"
+x = "s"
+y = "a"
+l = "q"
+r = "w"
+select = "backspace"
+start = "enter"
+up = "up"
+down = "down"
+left = "left"
+right = "right"
+
+# Crop pixels from the OUTER melonDS window before perception.
+# Start with zero. If the title/menu bar is visible in captures, tune these.
+[capture]
+inset_left = 0
+inset_top = 0
+inset_right = 0
+inset_bottom = 0
+screen_layout = "vertical"
+
+[learning]
+database = "data/experience.sqlite3"
+qtable = "data/qtable.json"
+alpha = 0.20
+gamma = 0.95
+epsilon = 0.10
