@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from renegade_ai.cli import make_adapter
-from renegade_ai.perception.scout import AutoCalibrationScout
+from renegade_ai.perception.semantic_scout import SemanticAutoCalibrationScout
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     config, adapter = make_adapter(args.config)
-    scout = AutoCalibrationScout(
+    scout = SemanticAutoCalibrationScout(
         adapter,
         config.capture.screen_layout,
         root=args.output,
