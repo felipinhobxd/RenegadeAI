@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import socket
 import struct
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Self
 
 
 class GDBRemoteError(RuntimeError):
@@ -90,7 +91,7 @@ class GDBRemoteClient:
             self._stopped = False
             self._pause_depth = 0
 
-    def __enter__(self) -> GDBRemoteClient:
+    def __enter__(self) -> Self:
         self.connect()
         return self
 
@@ -162,7 +163,7 @@ class GDBRemoteClient:
             return "already-stopped"
         self._socket().sendall(b"\x03")
         response = self._read_packet()
-        if not (response.startswith("S") or response.startswith("T")):
+        if not response.startswith(("S", "T")):
             raise GDBRemoteError(f"Unexpected stop response: {response!r}")
         self._stopped = True
         return response
