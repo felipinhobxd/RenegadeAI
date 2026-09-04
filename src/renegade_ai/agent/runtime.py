@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from renegade_ai.actions import DSButton
 from renegade_ai.emulator.base import EmulatorAdapter
@@ -21,6 +22,19 @@ _MOVE_TOUCH_CENTERS = (
     (0.25, 0.59),
     (0.75, 0.59),
 )
+
+
+def _screen_fingerprint(screen: Any) -> str:
+    import numpy as np
+
+    rgb = np.asarray(screen)[..., :3]
+    if rgb.size == 0:
+        return "empty"
+    height, width = rgb.shape[:2]
+    sy = max(1, height // 24)
+    sx = max(1, width // 32)
+    sample = (rgb[::sy, ::sx][:24, :32] // 16).astype("uint8")
+    return hashlib.blake2b(sample.tobytes(), digest_size=8).hexdigest()
 
 
 @dataclass(slots=True)
@@ -199,6 +213,11 @@ class BattleAutopilot:
         last_decision: str | None = None
         acted_scene: SceneType | None = None
         saw_battle = False
+        unknown_key: str | None = None
+        unknown_since = started
+        unknown_pressed = False
+        last_known_battle_scene = started
+        unknown_advances = 0
 
         while time.monotonic() - started < max_seconds:
             frame = self.emulator.capture()
@@ -206,12 +225,19 @@ class BattleAutopilot:
             observation = detect_scene(screens)
             scene = observation.scene
             last_scene = scene
+            now = time.monotonic()
+
+            if scene != SceneType.UNKNOWN:
+                unknown_key = None
+                unknown_pressed = False
+                unknown_advances = 0
 
             if acted_scene is not None and scene != acted_scene:
                 acted_scene = None
 
             if scene == SceneType.BATTLE_COMMAND:
                 saw_battle = True
+                last_known_battle_scene = now
                 if acted_scene is None:
                     reward = self._observe_learning_transition(screens)
                     # Bag and switching have calibrated entry buttons/screens,
@@ -226,6 +252,7 @@ class BattleAutopilot:
 
             elif scene == SceneType.MOVE_MENU:
                 saw_battle = True
+                last_known_battle_scene = now
                 if acted_scene is None:
                     last_decision = self._choose_move(screens)
                     if "no automatic input" not in last_decision:
@@ -244,7 +271,7 @@ class BattleAutopilot:
                 return BattleRunResult(
                     ended=True,
                     actions=actions,
-                    elapsed_seconds=time.monotonic() - started,
+                    elapsed_seconds=now - started,
                     last_scene=scene,
                     last_decision=last_decision,
                 )
@@ -258,6 +285,38 @@ class BattleAutopilot:
                 # Never mash A on a non-battle menu. This also protects against
                 # the old bug where summary moves looked like the battle menu.
                 last_decision = f"paused safely on {scene.value}; no automatic input"
+
+            elif scene == SceneType.UNKNOWN and saw_battle:
+                # Battle animations and text boxes are frequently UNKNOWN to the
+                # cheap color classifier. Wait until a frame is visually stable
+                # before pressing A once. If the text changes, it becomes a new
+                # stable frame and may receive one more A. This advances battle
+                # narration without the classic repeated-A menu spam loop.
+                key = _screen_fingerprint(screens.bottom)
+                if key != unknown_key:
+                    unknown_key = key
+                    unknown_since = now
+                    unknown_pressed = False
+                elif not unknown_pressed and now - unknown_since >= max(0.55, poll_seconds * 3):
+                    self.emulator.press(DSButton.A)
+                    actions += 1
+                    unknown_pressed = True
+                    unknown_advances += 1
+                    last_decision = "advance stable battle text"
+
+                # Some later overworld palettes are not yet classified as
+                # OVERWORLD. Do not hold the campaign hostage for ten minutes:
+                # after a prolonged unknown period, release control to the
+                # campaign director. If this was still a battle, the next known
+                # battle screen simply hands control back here.
+                if now - last_known_battle_scene >= 12.0 and unknown_advances >= 2:
+                    return BattleRunResult(
+                        ended=False,
+                        actions=actions,
+                        elapsed_seconds=now - started,
+                        last_scene=scene,
+                        last_decision="prolonged unknown; returned control to campaign director",
+                    )
 
             time.sleep(max(0.05, poll_seconds))
 
