@@ -90,9 +90,10 @@ def _upsert_table(text: str, table: str, values: dict[str, str]) -> str:
     for key, value in values.items():
         replacement = f"{key} = {value}"
         found = False
+        prefixes = (f"{key} ", f"{key}=")
         for index in range(start + 1, end):
             stripped = lines[index].strip()
-            if stripped.startswith(f"{key} ") or stripped.startswith(f"{key}="):
+            if stripped.startswith(prefixes):
                 lines[index] = replacement
                 found = True
                 break
