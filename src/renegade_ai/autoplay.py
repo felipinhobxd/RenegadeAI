@@ -88,6 +88,17 @@ def _connect_structured_memory(
         reader = PlatinumMemoryReader(client, reporter=_log)
         reader.probe()
         location = reader.read_location()
+        progress = reader.read_progress()
+        party_count = reader.party_count()
+        try:
+            story = reader.read_story_state()
+            objects = reader.read_field_objects(current_map_only=True)
+            enrichment = (
+                f", storyFlags={len(story.active_flag_ids)}, "
+                f"storyVars={len(story.nonzero_vars)}, mapObjects={len(objects)}"
+            )
+        except (OSError, GDBRemoteError, ValueError):
+            enrichment = ", story/object enrichment=pending"
     except (OSError, GDBRemoteError, ValueError) as exc:
         client.close()
         _log(
@@ -99,7 +110,9 @@ def _connect_structured_memory(
     _log(
         "Structured ARM9 read-only mode active: "
         f"{location.map_name}#{location.map_header_id} "
-        f"({location.x},{location.z}), facing={location.facing}."
+        f"({location.x},{location.z}), facing={location.facing}, "
+        f"party={party_count}/6, badges={progress.badge_count}, money={progress.money}"
+        f"{enrichment}."
     )
     return client, reader
 
