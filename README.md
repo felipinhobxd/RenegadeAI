@@ -8,92 +8,177 @@ Autonomous AI agent for **Pokemon Renegade Platinum** running in **melonDS**.
 
 The long-term target is an agent that can complete Renegade Platinum autonomously while controlling the game, observing state, planning routes/battles, building strong teams and learning from previous attempts.
 
-## Why the first backend uses the desktop window
-
-Upstream native Lua scripting in melonDS is still experimental. RenegadeAI therefore starts with an emulator abstraction and a **stock melonDS desktop backend**: keyboard input + RGB capture. A direct memory/scripting backend can be added later without replacing the agent.
+## Architecture
 
 ```text
 melonDS
    |
    +--> EmulatorAdapter
            |
-           +--> RGB frame --> perception --> structured state
-           |                                  |
-           +<-- DS buttons <-- planner <-------+
-                                 |
-                           learning + SQLite
+           +--> RGB frame --> auto viewport crop --> scene perception
+           |                                      |
+           +<-- DS buttons <-- battle/route agent <+
+                                   |
+                              learning + SQLite
 ```
 
-## Milestone 0 - foundation
+The first backend targets stock melonDS through its desktop window. On Windows, RenegadeAI now uses native scan-code input for more reliable D-pad control. A future direct-memory/scripting backend can replace only the emulator adapter without rewriting the agent.
+
+## Current progress
+
+### Milestone 0 - foundation
 
 - [x] melonDS desktop-window discovery
 - [x] RGB screenshot capture
 - [x] configurable Nintendo DS keyboard mapping
-- [x] normalized action model
-- [x] approximate top/bottom DS screen split
 - [x] persistent SQLite experience database
 - [x] Q-learning correction layer
 - [x] first battle heuristic/planner
-- [x] CLI diagnostics and capture tools
 - [x] unit tests + GitHub Actions
-- [ ] calibrated Renegade Platinum battle detection
-- [ ] automatic battle-menu control
 
-## Install on Windows
+### Milestone 1 - real Renegade Platinum perception
+
+Calibrated from real melonDS 1.1 Renegade Platinum captures.
+
+- [x] automatically find the centered DS viewport and remove black bars/window chrome
+- [x] split top/bottom DS screens after cropping
+- [x] recognize early-game overworld
+- [x] recognize the red `LUTAR` battle command
+- [x] recognize the move-selection screen
+- [x] native Windows scan-code input for arrows
+- [x] longer configurable D-pad hold time
+- [x] first pixel-driven battle autopilot
+- [ ] HP-bar measurement
+- [ ] species/move recognition
+- [ ] proper damage simulation connected to perception
+- [ ] party/bag/start-menu perception
+- [ ] overworld navigation
+
+## Install / update on Windows
 
 Python 3.11+ is recommended.
+
+Fresh clone:
 
 ```powershell
 git clone https://github.com/felipinhobxd/RenegadeAI.git
 cd RenegadeAI
+git checkout feat/agent-foundation
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e .[dev]
+python -m pip install -e ".[dev]"
 Copy-Item config.example.toml config.toml
 ```
 
-Open melonDS and load Renegade Platinum. Then run:
+If you already cloned the project:
+
+```powershell
+cd $HOME\Documents\RenegadeAI
+git checkout feat/agent-foundation
+git pull
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
+
+Open melonDS and load Renegade Platinum.
+
+## Check everything
 
 ```powershell
 renegade-ai doctor
 ```
 
-A successful check should report the melonDS window and the RGB capture size.
+The doctor now reports:
 
-### Capture what the AI sees
+- melonDS window;
+- RGB capture size;
+- input backend;
+- automatically detected DS viewport;
+- currently recognized scene;
+- perception metrics.
+
+## Test the D-pad
+
+First make `config.toml` match **melonDS > Config > Input and hotkeys > DS keypad**.
+
+On Windows the default `input_backend = "auto"` selects the native scan-code backend.
+
+Try a longer directional press:
+
+```powershell
+renegade-ai press up --seconds 0.30
+renegade-ai press down --seconds 0.30
+renegade-ai press left --seconds 0.30
+renegade-ai press right --seconds 0.30
+```
+
+If these still do not move the character, the most likely cause is that melonDS is not mapped to the arrow keys. Change `[melonds.keys]` in `config.toml` to the exact keys shown by melonDS.
+
+## See what the AI thinks is on screen
+
+```powershell
+renegade-ai observe
+```
+
+Expected states currently include:
+
+```text
+overworld
+battle_command
+move_menu
+unknown
+```
+
+## Capture the cleaned DS screens
 
 ```powershell
 renegade-ai capture --split
 ```
 
-This creates `captures/melonds.png`, plus approximate top/bottom screen captures. These images are the next calibration input for battle/menu perception.
+This now creates:
 
-### Test a DS button
-
-First make `config.toml` match **melonDS > Config > Input and hotkeys > DS keypad**. Then:
-
-```powershell
-renegade-ai press a
-renegade-ai press down
+```text
+captures/melonds.png
+captures/melonds-viewport.png
+captures/melonds-top.png
+captures/melonds-bottom.png
 ```
 
-The example config contains common keyboard bindings, but they are deliberately configurable because melonDS lets the user remap every DS key.
+The top/bottom images are cropped from the real DS viewport instead of simply cutting the whole Windows window in half.
 
-### Initialize learning storage
+## First automatic battle test
+
+The first autopilot proves the complete loop:
+
+```text
+pixels -> recognize LUTAR -> press A -> recognize moves -> choose slot 1 -> repeat
+```
+
+Run it while already stopped at the red `LUTAR` screen:
+
+```powershell
+renegade-ai battle-auto --max-seconds 120
+```
+
+For the current starter battle this selects the first move slot (Scratch) repeatedly. This is intentionally conservative: the next stage will read HP/species/moves and use the real battle planner instead of a fixed move slot.
+
+To stop it manually, use `Ctrl+C` in PowerShell.
+
+## Learning storage
 
 ```powershell
 renegade-ai db-init
 ```
 
-The generated learning data stays local and is ignored by Git.
+Local experience data is kept out of Git.
 
-## Next milestone
+## Next development targets
 
-1. Calibrate the exact two DS screen rectangles from your melonDS layout.
-2. Detect `overworld`, `dialog`, `battle`, and `menu` scenes.
-3. Detect HP bars and the four-move battle menu.
-4. Convert the selected battle decision into reliable menu button sequences.
-5. Feed battle outcomes into SQLite + Q-values.
-6. Add Renegade Platinum species/move/trainer knowledge and a proper damage simulator.
+1. Read player/enemy HP bars from the battle HUD.
+2. Recognize the current Pokemon and four moves.
+3. Connect those observations to type effectiveness and the damage simulator.
+4. Detect party, bag, start menu and Pokemon summary screens.
+5. Add overworld navigation and objective planning.
+6. Add team/build optimization and learned strategy memory.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
