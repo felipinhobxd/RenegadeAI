@@ -85,10 +85,10 @@ class BattleAutopilot:
         maximum = list(state.pp_max)
 
         if profile is not None:
-            # Summary scans currently save known moves in screen order. Empty
-            # fourth slots are naturally absent and therefore do not shift the
-            # common 1/2/3 pattern. Explicit slot metadata is also retained in
-            # RuntimeMove for future sparse-menu recovery.
+            # Summary scans save known moves in screen order. Empty fourth slots
+            # are naturally absent and therefore do not shift the common 1/2/3
+            # pattern. Explicit slot metadata remains available for future sparse
+            # menu recovery.
             for index, cached in enumerate(profile.moves[:4]):
                 while len(moves) <= index:
                     moves.append(None)
@@ -214,10 +214,9 @@ class BattleAutopilot:
                 saw_battle = True
                 if acted_scene is None:
                     reward = self._observe_learning_transition(screens)
-                    # Bag and switching now have calibrated buttons/screens, but
-                    # item-list rows and the post-party-selection submenu still
-                    # need captures before autonomous use. Until then, choosing
-                    # FIGHT is safer than inventing inventory or switch state.
+                    # Bag and switching have calibrated entry buttons/screens,
+                    # but item rows and switch confirmation still require the
+                    # autonomous scout captures before they are allowed live.
                     self._enter_fight()
                     actions += 1
                     acted_scene = scene
@@ -234,6 +233,14 @@ class BattleAutopilot:
                     acted_scene = scene
 
             elif scene == SceneType.OVERWORLD and saw_battle:
+                # Smart mode never intentionally uses RUN, so a normal
+                # battle->overworld transition is treated as successful battle
+                # completion. Future capture/flee detectors can pass a more
+                # specific outcome when those actions are enabled.
+                if self.adaptive_memory is not None:
+                    total_reward = self.adaptive_memory.finish_battle(won=True)
+                    suffix = f"ASI-Evolve battle reward={total_reward:+.1f}"
+                    last_decision = f"{last_decision}; {suffix}" if last_decision else suffix
                 return BattleRunResult(
                     ended=True,
                     actions=actions,
