@@ -7,9 +7,9 @@ from typing import Any
 
 from renegade_ai.learning.evolve import ASIEvolveEngine, RewardKind
 from renegade_ai.perception.ocr import OCRScanner
+from renegade_ai.perception.scene import SceneType
 from renegade_ai.perception.scout import AutoCalibrationScout, CaptureRecord
 from renegade_ai.perception.semantic import infer_semantic_label, normalize_ui_text
-from renegade_ai.perception.scene import SceneType
 
 _SCENE_LABELS = {
     SceneType.OVERWORLD: "overworld",
