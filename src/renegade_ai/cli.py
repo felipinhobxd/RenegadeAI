@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sync = sub.add_parser(
         "knowledge-sync",
-        help="Download and build Renegade Platinum knowledge for all National Dex 1-493",
+        help="Download and build Renegade Platinum knowledge for National Dex 1-493",
     )
     sync.add_argument("--sprites", action="store_true", help="Also cache Platinum sprites locally")
     sync.add_argument("--workers", type=int, default=12)
@@ -53,11 +53,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "identify",
-        help="OCR the current battle and identify Pokemon, levels, HP and moves",
+        help="OCR the current battle: Pokemon, levels, exact HP, status, moves and PP",
     )
     sub.add_parser(
+        "party-scan",
+        help="Read the visible six-slot Pokemon party screen and remember it locally",
+    )
+    sub.add_parser(
+        "summary-scan",
+        help="Read and remember the visible Pokemon Dados or Movimentos summary page",
+    )
+    sub.add_parser("state-show", help="Show exact Pokemon data remembered from UI scans")
+    sub.add_parser(
         "battle-plan",
-        help="Read the current move menu and rank every recognized move without pressing anything",
+        help="Rank the visible battle moves using OCR plus remembered exact Pokemon stats",
     )
 
     battle = sub.add_parser("battle-auto", help="Run the pixel-driven battle loop")
@@ -66,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     battle.add_argument(
         "--smart",
         action="store_true",
-        help="Use OCR + Renegade dex + matchup-aware move selection",
+        help="Use OCR + Renegade dex + exact scanned state + matchup planning",
     )
 
     sub.add_parser("db-init", help="Initialize the experience database")
@@ -96,6 +105,12 @@ def _load_battle_state(config_path: Path | None):
 
 def _fmt_hp(value: float | None) -> str:
     return "unknown" if value is None else f"{value:.0%}"
+
+
+def _fmt_exact_hp(current: int | None, maximum: int | None, fraction: float | None) -> str:
+    if current is not None and maximum is not None:
+        return f"{current}/{maximum} ({current / maximum:.0%})"
+    return _fmt_hp(fraction)
 
 
 def cmd_doctor(config_path: Path | None) -> int:
@@ -235,7 +250,7 @@ def cmd_strategy(raw_pokemon: str) -> int:
     print("Ideal moves:")
     for move in profile.ideal_moves:
         print(f"  - {move}")
-    print("Note: the live battle planner can override this build for the current matchup.")
+    print("Live battle decisions override the generic build when the matchup requires it.")
     return 0
 
 
@@ -246,48 +261,236 @@ def cmd_identify(config_path: Path | None) -> int:
     own = "unknown" if state.own is None else state.own.name
     opponent = "unknown" if state.opponent is None else state.opponent.name
     print(
-        f"Own: {own} level={state.own_level or '?'} hp={_fmt_hp(state.own_hp_fraction)} "
-        f"match={state.own_match_confidence:.0%}"
+        f"Own: {own} level={state.own_level or '?'} "
+        f"hp={_fmt_exact_hp(state.own_hp_current, state.own_hp_max, state.own_hp_fraction)} "
+        f"status={state.own_status or '-'} match={state.own_match_confidence:.0%}"
     )
     print(
         f"Opponent: {opponent} level={state.opponent_level or '?'} "
-        f"hp={_fmt_hp(state.opponent_hp_fraction)} "
+        f"hp={_fmt_hp(state.opponent_hp_fraction)} status={state.opponent_status or '-'} "
         f"match={state.opponent_match_confidence:.0%}"
     )
     for index, move in enumerate(state.moves, start=1):
         name = "unknown/empty" if move is None else move.name
         confidence = state.move_confidences[index - 1]
-        print(f"Move {index}: {name} ({confidence:.0%})")
+        current = state.pp_current[index - 1]
+        maximum = state.pp_max[index - 1]
+        pp = "?" if current is None or maximum is None else f"{current}/{maximum}"
+        print(f"Move {index}: {name} PP={pp} ({confidence:.0%})")
     if state.own is None or state.opponent is None:
         print(f"Raw own OCR: {state.raw_own_text}")
         print(f"Raw opponent OCR: {state.raw_opponent_text}")
     return 0
 
 
+def cmd_party_scan(config_path: Path | None) -> int:
+    from renegade_ai.knowledge.dex import RenegadeDex
+    from renegade_ai.perception.party_vision import PartyVision
+    from renegade_ai.state.runtime import RuntimeStateStore
+
+    config, adapter = make_adapter(config_path)
+    screens = split_ds_screens(adapter.capture(), config.capture.screen_layout)
+    scene = detect_scene(screens)
+    if scene.scene != SceneType.PARTY_MENU:
+        print(f"Current scene is {scene.scene.value}. Open POKEMON so the party list is visible.")
+        return 2
+
+    dex = RenegadeDex()
+    state = PartyVision().observe(screens, dex)
+    store = RuntimeStateStore()
+    for member in state.members:
+        if member.pokemon is None:
+            store.set_party_slot(member.slot, None)
+            print(f"Slot {member.slot + 1}: empty")
+            continue
+        pokemon = member.pokemon
+        store.set_party_slot(member.slot, pokemon.slug)
+        store.upsert(
+            pokemon.slug,
+            pokemon.name,
+            hp_current=member.hp_current,
+            hp_max=member.hp_max,
+            status=member.status,
+        )
+        print(
+            f"Slot {member.slot + 1}: {pokemon.name} "
+            f"HP={_fmt_exact_hp(member.hp_current, member.hp_max, member.hp_fraction)} "
+            f"status={member.status or '-'} match={member.confidence:.0%}"
+        )
+    store.save()
+    print("Party state saved to data/runtime_state.json")
+    return 0
+
+
+def cmd_summary_scan(config_path: Path | None) -> int:
+    from renegade_ai.knowledge.dex import RenegadeDex
+    from renegade_ai.perception.summary_vision import SummaryVision
+    from renegade_ai.state.runtime import RuntimeMove, RuntimeStateStore
+
+    config, adapter = make_adapter(config_path)
+    screens = split_ds_screens(adapter.capture(), config.capture.screen_layout)
+    scene = detect_scene(screens)
+    dex = RenegadeDex()
+    vision = SummaryVision()
+    store = RuntimeStateStore()
+
+    if scene.scene == SceneType.SUMMARY_STATS:
+        state = vision.observe_stats(screens, dex)
+        if state.pokemon is None:
+            print(f"Could not identify Pokemon. Raw OCR: {state.raw_text}")
+            return 2
+        pokemon = state.pokemon
+        store.upsert(
+            pokemon.slug,
+            pokemon.name,
+            level=state.level,
+            hp_current=state.hp_current,
+            hp_max=state.hp_max,
+            status=state.status,
+            ability=state.ability,
+            item=state.item,
+            attack=state.attack,
+            defense=state.defense,
+            special_attack=state.special_attack,
+            special_defense=state.special_defense,
+            speed=state.speed,
+        )
+        store.save()
+        print(f"Saved exact stats for {pokemon.name} (match={state.confidence:.0%})")
+        print(
+            f"Lv={state.level or '?'} HP={state.hp_current or '?'}/{state.hp_max or '?'} "
+            f"status={state.status or '-'} ability={state.ability or '?'} "
+            f"item={state.item or 'none'}"
+        )
+        print(
+            f"Atk={state.attack or '?'} Def={state.defense or '?'} "
+            f"SpA={state.special_attack or '?'} SpD={state.special_defense or '?'} "
+            f"Spe={state.speed or '?'}"
+        )
+        return 0
+
+    if scene.scene == SceneType.SUMMARY_MOVES:
+        state = vision.observe_moves(screens, dex)
+        if state.pokemon is None:
+            print("Could not identify Pokemon on the Movimentos page.")
+            return 2
+        pokemon = state.pokemon
+        profile = store.upsert(pokemon.slug, pokemon.name, status=state.status)
+        profile.moves = []
+        for index, move in enumerate(state.moves):
+            if move is None:
+                continue
+            profile.moves.append(
+                RuntimeMove(
+                    slug=move.slug,
+                    name=move.name,
+                    pp_current=state.pp_current[index],
+                    pp_max=state.pp_max[index],
+                )
+            )
+            pp = (
+                "?"
+                if state.pp_current[index] is None or state.pp_max[index] is None
+                else f"{state.pp_current[index]}/{state.pp_max[index]}"
+            )
+            print(f"Move {index + 1}: {move.name} PP={pp}")
+        store.save()
+        print(f"Saved moves for {pokemon.name} (match={state.confidence:.0%})")
+        return 0
+
+    print(
+        f"Current scene is {scene.scene.value}. Open Dados or Movimentos in the Pokemon summary."
+    )
+    return 2
+
+
+def cmd_state_show() -> int:
+    from renegade_ai.state.runtime import RuntimeStateStore
+
+    store = RuntimeStateStore()
+    party = store.party()
+    if not party:
+        print("No scanned party state yet. Run party-scan and summary-scan.")
+        return 0
+    for slot, slug in enumerate(store.party_slots, start=1):
+        if slug is None:
+            print(f"Slot {slot}: empty")
+            continue
+        profile = store.profile_for(slug)
+        if profile is None:
+            print(f"Slot {slot}: {slug} (no details)")
+            continue
+        print(
+            f"Slot {slot}: {profile.name} Lv={profile.level or '?'} "
+            f"HP={profile.hp_current or '?'}/{profile.hp_max or '?'} "
+            f"status={profile.status or '-'} ability={profile.ability or '?'} "
+            f"item={profile.item or 'none'}"
+        )
+        if profile.attack is not None:
+            print(
+                f"  Atk={profile.attack} Def={profile.defense} SpA={profile.special_attack} "
+                f"SpD={profile.special_defense} Spe={profile.speed}"
+            )
+        if profile.moves:
+            print(
+                "  Moves: "
+                + ", ".join(
+                    f"{move.name} {move.pp_current or '?'}/{move.pp_max or '?'}"
+                    for move in profile.moves
+                )
+            )
+    return 0
+
+
 def cmd_battle_plan(config_path: Path | None) -> int:
+    from renegade_ai.state.runtime import RuntimeStateStore
     from renegade_ai.strategy.battle import rank_moves
 
     _config, _adapter, screens, _dex, state = _load_battle_state(config_path)
     scene = detect_scene(screens)
     if scene.scene != SceneType.MOVE_MENU:
-        print(f"Current scene is {scene.scene.value}. Open LUTAR so the move menu is visible.")
+        print(f"Current scene is {scene.scene.value}. Open LUTAR so battle moves are visible.")
         return 2
     if state.own is None or state.opponent is None:
-        print("Could not identify both Pokemon confidently. Run renegade-ai identify for OCR details.")
+        print("Could not identify both Pokemon. Run renegade-ai identify for OCR details.")
         return 2
 
+    store = RuntimeStateStore()
+    runtime = store.profile_for(state.own.slug)
+    moves = list(state.moves)
+    pp_current = list(state.pp_current)
+    pp_max = list(state.pp_max)
+    if runtime is not None:
+        for index, cached in enumerate(runtime.moves[:4]):
+            if index < len(moves) and moves[index] is None:
+                moves[index] = _dex.moves.get(cached.slug)
+            if index < len(pp_current) and pp_current[index] is None:
+                pp_current[index] = cached.pp_current
+            if index < len(pp_max) and pp_max[index] is None:
+                pp_max[index] = cached.pp_max
+
+    pp_fractions = [
+        1.0 if now is None or not full else max(0.0, min(1.0, now / full))
+        for now, full in zip(pp_current, pp_max, strict=False)
+    ]
     ranked = rank_moves(
         state.own,
         state.opponent,
-        list(state.moves),
+        moves,
         own_hp=state.own_hp_fraction or 1.0,
         opponent_hp=state.opponent_hp_fraction or 1.0,
+        pp_fractions=pp_fractions,
+        own_level=state.own_level or (runtime.level if runtime else None) or 50,
+        opponent_level=state.opponent_level or 50,
+        own_runtime=runtime,
     )
     if not ranked:
-        print("No move was recognized. Run renegade-ai identify and send the output/capture.")
+        print("No move was recognized. Run identify and send the output/capture.")
         return 2
 
     print(f"Battle plan: {state.own.name} vs {state.opponent.name}")
+    if runtime is not None and runtime.ability:
+        print(f"Using scanned ability/stats: {runtime.ability}")
     for rank, option in enumerate(ranked, start=1):
         print(
             f"{rank}. slot {option.slot + 1}: {option.move.name} score={option.score:.1f} "
@@ -313,11 +516,13 @@ def cmd_battle_auto(
 
         kwargs = {"dex": RenegadeDex(), "vision": BattleVision()}
 
-    print("Battle autopilot started. Keep melonDS visible and do not use the keyboard/mouse.")
+    print("Battle autopilot started. Keep melonDS visible and do not use keyboard/mouse.")
     if smart:
-        print("Smart policy: OCR Pokemon/moves -> Renegade matchup scoring -> direct touch selection.")
+        print(
+            "Smart policy: OCR + exact scanned stats/ability/PP + Renegade mechanics + touch."
+        )
     else:
-        print("Basic policy: enter LUTAR and choose move slot 1. Add --smart for matchup planning.")
+        print("Basic policy: enter LUTAR and choose slot 1. Add --smart for matchup planning.")
     result = BattleAutopilot(adapter, config.capture.screen_layout, **kwargs).run(
         max_seconds=max_seconds,
         poll_seconds=poll_seconds,
@@ -358,6 +563,12 @@ def main(argv: list[str] | None = None) -> None:
         code = cmd_strategy(args.pokemon)
     elif args.command == "identify":
         code = cmd_identify(args.config)
+    elif args.command == "party-scan":
+        code = cmd_party_scan(args.config)
+    elif args.command == "summary-scan":
+        code = cmd_summary_scan(args.config)
+    elif args.command == "state-show":
+        code = cmd_state_show()
     elif args.command == "battle-plan":
         code = cmd_battle_plan(args.config)
     elif args.command == "battle-auto":
