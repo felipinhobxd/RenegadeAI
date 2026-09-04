@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import sys
 import time
 from typing import Any
 
 from renegade_ai.actions import DSButton
 from renegade_ai.config import CaptureConfig, MelonDSConfig
 from renegade_ai.emulator.base import EmulatorAdapter, EmulatorWindow
+
+
+_DPAD = {DSButton.UP, DSButton.DOWN, DSButton.LEFT, DSButton.RIGHT}
 
 
 class DesktopMelonDSAdapter(EmulatorAdapter):
@@ -19,6 +23,13 @@ class DesktopMelonDSAdapter(EmulatorAdapter):
         self.config = melonds
         self.capture_config = capture
         self._window: Any | None = None
+
+    @property
+    def input_backend_name(self) -> str:
+        requested = self.config.input_backend
+        if requested == "auto":
+            return "windows" if sys.platform == "win32" else "pyautogui"
+        return requested
 
     def _find_native_window(self) -> Any:
         try:
@@ -59,7 +70,7 @@ class DesktopMelonDSAdapter(EmulatorAdapter):
                 window.restore()
                 time.sleep(0.15)
             window.activate()
-            time.sleep(0.08)
+            time.sleep(0.10)
         except Exception as exc:  # pragma: no cover - OS foreground rules vary
             raise RuntimeError(
                 "Found melonDS but could not focus it. Click the emulator once and retry."
@@ -88,14 +99,39 @@ class DesktopMelonDSAdapter(EmulatorAdapter):
             bgra = np.asarray(shot)
         return bgra[:, :, :3][:, :, ::-1].copy()
 
-    def press(self, button: DSButton) -> None:
-        import pyautogui
-
+    def press(self, button: DSButton, duration: float | None = None) -> None:
         key = self.config.keys.get(button)
         if not key:
             raise KeyError(f"No keyboard mapping configured for DS button {button.value}")
+
+        if duration is None:
+            duration = (
+                self.config.direction_press_seconds
+                if button in _DPAD
+                else self.config.press_seconds
+            )
+        duration = max(0.01, float(duration))
+
         if self.config.focus_before_input:
             self.focus()
-        pyautogui.keyDown(key)
-        time.sleep(max(0.01, self.config.press_seconds))
-        pyautogui.keyUp(key)
+
+        backend = self.input_backend_name
+        if backend == "windows":
+            if sys.platform != "win32":
+                raise RuntimeError("The windows input backend requires Windows")
+            from renegade_ai.emulator.wininput import press_key
+
+            press_key(key, duration)
+            return
+
+        if backend == "pyautogui":
+            import pyautogui
+
+            pyautogui.keyDown(key)
+            try:
+                time.sleep(duration)
+            finally:
+                pyautogui.keyUp(key)
+            return
+
+        raise RuntimeError(f"Unknown input backend: {backend}")
