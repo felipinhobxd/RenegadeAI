@@ -18,6 +18,7 @@ data/battle_adaptive.json
 data/evolve_state.json
 data/evolve_qtable.json
 data/evolve_rewards.jsonl
+data/campaign_map.json
 data/knowledge/
 data/sprites/
 config.toml
