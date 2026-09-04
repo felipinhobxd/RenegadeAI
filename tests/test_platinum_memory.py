@@ -190,3 +190,21 @@ def test_reader_exposes_persisted_field_objects_for_current_map(tmp_path):
     assert obj.map_name == "JUBILIFE_CITY"
     assert (obj.x, obj.z) == (12, 22)
     assert obj.facing == "left"
+
+
+def test_vars_flags_catalog_parses_aliases_and_sequential_values():
+    text = """
+FLAG_ZERO
+FLAG_STORY
+VARS_START = 16384
+VAR_FIRST = VARS_START
+VAR_SECOND
+VAR_THIRD = VAR_FIRST + 2
+"""
+    flags, variables = VarsFlagsCatalog.parse(text)
+
+    assert flags[0] == "FLAG_ZERO"
+    assert flags[1] == "FLAG_STORY"
+    assert variables[VARS_START] == "VAR_FIRST"
+    assert variables[VARS_START + 1] == "VAR_SECOND"
+    assert variables[VARS_START + 2] == "VAR_THIRD"
