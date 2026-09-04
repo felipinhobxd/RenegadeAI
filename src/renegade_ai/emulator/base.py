@@ -33,5 +33,11 @@ class EmulatorAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def press(self, button: DSButton) -> None:
+    def press(self, button: DSButton, duration: float | None = None) -> None:
+        """Press a Nintendo DS button.
+
+        ``duration`` overrides the configured hold time. Directional inputs often
+        need a slightly longer hold than face buttons when driving stock melonDS
+        from the desktop.
+        """
         raise NotImplementedError
