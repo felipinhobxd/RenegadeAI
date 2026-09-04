@@ -11,9 +11,9 @@ from renegade_ai.perception.scene import SceneType, detect_scene
 
 if TYPE_CHECKING:
     from renegade_ai.knowledge.dex import RenegadeDex
+    from renegade_ai.learning.battle_memory import BattleAdaptiveMemory
     from renegade_ai.perception.battle_vision import BattleVision, BattleVisualState
     from renegade_ai.state.runtime import RuntimePokemon, RuntimeStateStore
-
 
 _MOVE_TOUCH_CENTERS = (
     (0.25, 0.27),
@@ -33,7 +33,7 @@ class BattleRunResult:
 
 
 class BattleAutopilot:
-    """Pixel-driven battle loop with optional Renegade-aware move planning."""
+    """Pixel-driven battle loop with Renegade mechanics and bounded learning."""
 
     def __init__(
         self,
@@ -43,6 +43,7 @@ class BattleAutopilot:
         dex: RenegadeDex | None = None,
         vision: BattleVision | None = None,
         state_store: RuntimeStateStore | None = None,
+        adaptive_memory: BattleAdaptiveMemory | None = None,
     ) -> None:
         self.emulator = emulator
         self.screen_layout = screen_layout
@@ -52,7 +53,12 @@ class BattleAutopilot:
             from renegade_ai.state.runtime import RuntimeStateStore
 
             state_store = RuntimeStateStore()
+        if adaptive_memory is None and dex is not None and vision is not None:
+            from renegade_ai.learning.battle_memory import BattleAdaptiveMemory
+
+            adaptive_memory = BattleAdaptiveMemory()
         self.state_store = state_store
+        self.adaptive_memory = adaptive_memory
 
     @property
     def smart(self) -> bool:
@@ -69,6 +75,7 @@ class BattleAutopilot:
             hp_max=state.own_hp_max,
             status=state.own_status,
         )
+        self.state_store.save()
         return profile
 
     def _moves_and_pp(self, state: BattleVisualState, profile: RuntimePokemon | None):
@@ -78,6 +85,10 @@ class BattleAutopilot:
         maximum = list(state.pp_max)
 
         if profile is not None:
+            # Summary scans currently save known moves in screen order. Empty
+            # fourth slots are naturally absent and therefore do not shift the
+            # common 1/2/3 pattern. Explicit slot metadata is also retained in
+            # RuntimeMove for future sparse-menu recovery.
             for index, cached in enumerate(profile.moves[:4]):
                 while len(moves) <= index:
                     moves.append(None)
@@ -141,16 +152,37 @@ class BattleAutopilot:
             return "No move was confidently recognized or cached; safe fallback slot 1"
 
         best = ranked[0]
+        learned_correction = 0.0
+        if self.adaptive_memory is not None:
+            best, learned_correction = self.adaptive_memory.choose(state, ranked)
+
         if best.score < -100:
             return "All recognized damaging move PP appears exhausted; no automatic input sent"
 
         x, y = _MOVE_TOUCH_CENTERS[best.slot]
         self.emulator.touch_bottom(x, y)
+        if self.adaptive_memory is not None:
+            self.adaptive_memory.remember(state, best.move.slug)
+
         status_text = "" if not state.own_status else f", status={state.own_status}"
+        learning_text = (
+            ""
+            if abs(learned_correction) < 0.05
+            else f", learned={learned_correction:+.1f}"
+        )
         return (
             f"{state.own.name} vs {state.opponent.name}: slot {best.slot + 1} "
-            f"{best.move.name} score={best.score:.1f}{status_text}; {best.reason}"
+            f"{best.move.name} score={best.score:.1f}{learning_text}{status_text}; {best.reason}"
         )
+
+    def _observe_learning_transition(self, screens) -> float | None:
+        if not self.smart or self.adaptive_memory is None:
+            return None
+        assert self.dex is not None
+        assert self.vision is not None
+        state = self.vision.observe(screens, self.dex)
+        self._update_runtime_profile(state)
+        return self.adaptive_memory.observe_next_turn(state)
 
     def _enter_fight(self) -> None:
         if self.smart:
@@ -181,6 +213,7 @@ class BattleAutopilot:
             if scene == SceneType.BATTLE_COMMAND:
                 saw_battle = True
                 if acted_scene is None:
+                    reward = self._observe_learning_transition(screens)
                     # Bag and switching now have calibrated buttons/screens, but
                     # item-list rows and the post-party-selection submenu still
                     # need captures before autonomous use. Until then, choosing
@@ -189,6 +222,8 @@ class BattleAutopilot:
                     actions += 1
                     acted_scene = scene
                     last_decision = "enter LUTAR/FIGHT"
+                    if reward is not None:
+                        last_decision += f"; learned reward={reward:+.1f}"
 
             elif scene == SceneType.MOVE_MENU:
                 saw_battle = True
