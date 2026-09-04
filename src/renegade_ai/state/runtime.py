@@ -10,6 +10,7 @@ DEFAULT_RUNTIME_STATE = Path("data/runtime_state.json")
 
 @dataclass(slots=True)
 class RuntimeMove:
+    slot: int
     slug: str
     name: str
     pp_current: int | None = None
@@ -18,6 +19,7 @@ class RuntimeMove:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> RuntimeMove:
         return cls(
+            slot=int(raw.get("slot", 0)),
             slug=str(raw.get("slug", "")),
             name=str(raw.get("name", "")),
             pp_current=None if raw.get("pp_current") is None else int(raw["pp_current"]),
