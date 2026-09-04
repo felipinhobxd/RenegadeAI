@@ -45,6 +45,23 @@ _UTILITY_MOVES = {
     "toxic-spikes",
     "will-o-wisp",
 }
+_PUNCHING_MOVES = {
+    "bullet-punch",
+    "comet-punch",
+    "dizzy-punch",
+    "drain-punch",
+    "dynamic-punch",
+    "fire-punch",
+    "focus-punch",
+    "hammer-arm",
+    "ice-punch",
+    "mach-punch",
+    "mega-punch",
+    "meteor-mash",
+    "shadow-punch",
+    "sky-uppercut",
+    "thunder-punch",
+}
 
 _ABILITY_PRIORITY = {
     "adaptability": 100,
@@ -54,15 +71,23 @@ _ABILITY_PRIORITY = {
     "technician": 95,
     "speed-boost": 95,
     "poison-heal": 94,
+    "regenerator": 94,
     "drizzle": 93,
     "drought": 93,
     "intimidate": 92,
+    "guts": 91,
+    "mold-breaker": 90,
     "levitate": 90,
+    "no-guard": 89,
     "serene-grace": 89,
     "multiscale": 89,
+    "iron-fist": 88,
+    "tinted-lens": 88,
+    "filter": 87,
+    "solid-rock": 87,
     "sturdy": 86,
+    "scrappy": 85,
     "natural-cure": 84,
-    "regenerator": 94,
     "blaze": 60,
     "torrent": 60,
     "overgrow": 60,
@@ -70,13 +95,48 @@ _ABILITY_PRIORITY = {
 }
 
 
-def _preferred_ability(pokemon: PokemonData) -> str | None:
+def _ability_slug(value: str) -> str:
+    return value.lower().strip().replace(" ", "-")
+
+
+def _learnable_moves(pokemon: PokemonData, moves: dict[str, MoveData]) -> list[MoveData]:
+    return [moves[entry.move] for entry in pokemon.learnset if entry.move in moves]
+
+
+def _ability_score(ability: str, pokemon: PokemonData, moves: dict[str, MoveData]) -> float:
+    ability_slug = _ability_slug(ability)
+    score = float(_ABILITY_PRIORITY.get(ability_slug, 50))
+    learnable = _learnable_moves(pokemon, moves)
+    damaging = [move for move in learnable if move.power and move.power > 0]
+
+    # Move-dependent abilities should not outrank a universally useful ability
+    # unless this species can actually exploit them in Renegade Platinum.
+    if ability_slug == "iron-fist":
+        punches = sum(move.slug in _PUNCHING_MOVES for move in damaging)
+        score += min(24, punches * 6) if punches else -20
+    elif ability_slug == "technician":
+        eligible = sum((move.power or 0) <= 60 for move in damaging)
+        score += min(18, eligible * 2) if eligible else -12
+    elif ability_slug == "no-guard":
+        inaccurate = sum(move.accuracy is not None and move.accuracy < 90 for move in damaging)
+        score += min(20, inaccurate * 5) if inaccurate else -10
+    elif ability_slug == "adaptability":
+        stab_moves = sum(move.type.lower() in {value.lower() for value in pokemon.types} for move in damaging)
+        score += min(12, stab_moves * 2)
+    elif ability_slug in {"huge-power", "pure-power", "guts"}:
+        score += 12 if pokemon.attack >= pokemon.special_attack else -8
+    elif ability_slug == "serene-grace":
+        # Secondary-effect chance is not yet stored in MoveData, so keep the
+        # strong baseline but avoid inventing move-specific bonuses here.
+        score += 0
+
+    return score
+
+
+def _preferred_ability(pokemon: PokemonData, moves: dict[str, MoveData]) -> str | None:
     if not pokemon.abilities:
         return None
-    return max(
-        pokemon.abilities,
-        key=lambda value: _ABILITY_PRIORITY.get(value.lower().replace(" ", "-"), 50),
-    )
+    return max(pokemon.abilities, key=lambda ability: _ability_score(ability, pokemon, moves))
 
 
 def _role(pokemon: PokemonData) -> tuple[str, str]:
@@ -189,18 +249,18 @@ def _ideal_moves(
             break
 
     status_scores: dict[str, float] = defaultdict(float)
-    for slug in learnable:
-        if slug in _SETUP_MOVES:
-            status_scores[slug] = _SETUP_MOVES[slug] + (
+    for move_slug in learnable:
+        if move_slug in _SETUP_MOVES:
+            status_scores[move_slug] = _SETUP_MOVES[move_slug] + (
                 8 if "sweeper" in role or role == "breaker" else 0
             )
-        if slug in _RECOVERY_MOVES:
-            status_scores[slug] = max(
-                status_scores[slug], 46 if "wall" in role or "bulky" in role else 30
+        if move_slug in _RECOVERY_MOVES:
+            status_scores[move_slug] = max(
+                status_scores[move_slug], 46 if "wall" in role or "bulky" in role else 30
             )
-        if slug in _UTILITY_MOVES:
-            status_scores[slug] = max(
-                status_scores[slug], 40 if "utility" in role or "wall" in role else 24
+        if move_slug in _UTILITY_MOVES:
+            status_scores[move_slug] = max(
+                status_scores[move_slug], 40 if "utility" in role or "wall" in role else 24
             )
 
     if status_scores:
@@ -219,11 +279,12 @@ def _ideal_moves(
 def build_strategy_profile(pokemon: PokemonData, moves: dict[str, MoveData]) -> StrategyProfile:
     role, offense = _role(pokemon)
     nature, evs, item = _nature_and_evs(pokemon, role, offense)
-    ability = _preferred_ability(pokemon)
+    ability = _preferred_ability(pokemon, moves)
     ideal_moves = _ideal_moves(pokemon, moves, role, offense)
 
     notes = [
         f"Renegade role generated from {pokemon.name}'s actual synced stats and typing.",
+        "Ability choice is scored against this species' actual Renegade learnset.",
         "Battle-time decisions still override the ideal build when matchup, HP, PP or risk demands it.",
     ]
     return StrategyProfile(
