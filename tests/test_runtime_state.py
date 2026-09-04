@@ -19,9 +19,9 @@ def test_runtime_state_round_trip(tmp_path):
         speed=12,
     )
     profile.moves = [
-        RuntimeMove("scratch", "Scratch", 32, 35),
-        RuntimeMove("leer", "Leer", 30, 30),
-        RuntimeMove("ember", "Ember", 25, 25),
+        RuntimeMove("scratch", "Scratch", 32, 35, slot=0),
+        RuntimeMove("leer", "Leer", 30, 30, slot=1),
+        RuntimeMove("ember", "Ember", 25, 25, slot=2),
     ]
     store.set_party_slot(0, "chimchar")
     store.save()
@@ -33,4 +33,5 @@ def test_runtime_state_round_trip(tmp_path):
     assert chimchar.ability == "Iron Fist"
     assert chimchar.attack == 11
     assert [move.name for move in chimchar.moves] == ["Scratch", "Leer", "Ember"]
+    assert [move.slot for move in chimchar.moves] == [0, 1, 2]
     assert loaded.party_slots[0] == "chimchar"
