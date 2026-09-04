@@ -96,7 +96,7 @@ def run_daemon(
         except KeyboardInterrupt:
             _log("Autoplay stopped by user.")
             return 130
-        except Exception as exc:  # CLI/daemon boundary: keep background watcher alive.
+        except Exception as exc:  # noqa: BLE001 - daemon must survive session-level failures.
             _log(f"Autoplay session error: {type(exc).__name__}: {exc}")
             time.sleep(max(2.0, wait_seconds))
 
