@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import sqlite3
-from typing import Any, Iterator
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 
 SCHEMA = """
@@ -54,7 +55,7 @@ class ExperienceStore:
             connection.close()
 
     def start_episode(self, mode: str = "run") -> int:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with self.connect() as connection:
             cursor = connection.execute(
                 "INSERT INTO episodes(started_at, mode) VALUES (?, ?)", (now, mode)
@@ -71,7 +72,7 @@ class ExperienceStore:
         reward: float,
         next_state_key: str | None,
     ) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with self.connect() as connection:
             connection.execute(
                 """
@@ -93,7 +94,7 @@ class ExperienceStore:
             )
 
     def finish_episode(self, episode_id: int, result: str, total_reward: float) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with self.connect() as connection:
             connection.execute(
                 """
