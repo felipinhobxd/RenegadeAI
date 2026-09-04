@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 
 from renegade_ai.actions import DSButton
 from renegade_ai.emulator.base import EmulatorAdapter
@@ -57,9 +57,6 @@ class BattleAutopilot:
             elif scene == SceneType.MOVE_MENU:
                 saw_battle = True
                 if acted_scene is None:
-                    # First move slot. In the user's starter battle this is Scratch.
-                    # The game remembers the selected slot, so repeated turns remain
-                    # deterministic until the richer move planner takes over.
                     self.emulator.press(DSButton.A)
                     actions += 1
                     acted_scene = scene
