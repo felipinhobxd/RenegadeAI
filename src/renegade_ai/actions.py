@@ -18,7 +18,7 @@ class DSButton(StrEnum):
     RIGHT = "right"
 
     @classmethod
-    def parse(cls, value: str) -> "DSButton":
+    def parse(cls, value: str) -> DSButton:
         normalized = value.strip().lower()
         try:
             return cls(normalized)
