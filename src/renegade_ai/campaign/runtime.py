@@ -22,7 +22,12 @@ from renegade_ai.perception.semantic import infer_semantic_label, normalize_ui_t
 if TYPE_CHECKING:
     from renegade_ai.emulator.base import EmulatorAdapter
     from renegade_ai.knowledge.dex import RenegadeDex
-    from renegade_ai.memory.platinum import PlatinumMemoryReader, StructuredLocation
+    from renegade_ai.memory.platinum import (
+        PlatinumMemoryReader,
+        StructuredFieldObject,
+        StructuredLocation,
+        StructuredStoryState,
+    )
 
 
 _SCENE_CAPTURE_NAMES = {
@@ -42,6 +47,27 @@ _MILESTONES = {
     "badge_received": RewardKind.BADGE,
     "boss_victory": RewardKind.BOSS_WIN,
     "game_complete": RewardKind.GAME_COMPLETE,
+}
+
+# These persistent flags are strong-enough evidence of useful campaign progress
+# to deserve a small reward. They are deliberately much smaller than a badge or
+# boss victory, preventing generic flag churn from becoming the main objective.
+_STORY_PROGRESS_PREFIXES = (
+    "FLAG_DEFEATED_",
+    "FLAG_UNLOCKED_",
+    "FLAG_TALKED_TO_",
+    "FLAG_TEAM_GALACTIC_",
+    "FLAG_GALACTIC_",
+    "FLAG_RECEIVED_",
+    "FLAG_HAS_",
+    "FLAG_ROARK_",
+)
+
+_DIRECTION_DELTAS = {
+    DSButton.UP: (0, -1),
+    DSButton.DOWN: (0, 1),
+    DSButton.LEFT: (-1, 0),
+    DSButton.RIGHT: (1, 0),
 }
 
 
@@ -78,9 +104,21 @@ def _looks_like_text_interaction(lines: list[str]) -> bool:
     if len(words) >= 4:
         return True
     keywords = (
-        "continue", "continuar", "sim", "yes", "nao", "no", "pokemon",
-        "recebeu", "obteve", "parabens", "congratulations", "level",
-        "nivel", "evoluiu", "evolved",
+        "continue",
+        "continuar",
+        "sim",
+        "yes",
+        "nao",
+        "no",
+        "pokemon",
+        "recebeu",
+        "obteve",
+        "parabens",
+        "congratulations",
+        "level",
+        "nivel",
+        "evoluiu",
+        "evolved",
     )
     return any(keyword in normalized for keyword in keywords)
 
@@ -128,7 +166,11 @@ class CampaignAutopilot:
         self._last_structured_location: StructuredLocation | None = None
         self._last_badge_mask: int | None = None
         self._last_story_cleared: bool | None = None
+        self._last_story_digest: str | None = None
+        self._last_story_flag_ids: set[int] | None = None
         self._last_progress_poll = 0.0
+        self._last_object_poll = 0.0
+        self._cached_field_objects: tuple[StructuredFieldObject, ...] = ()
 
         memory = BattleAdaptiveMemory(evolve_engine=self.evolve)
         self.battle = BattleAutopilot(
@@ -186,6 +228,34 @@ class CampaignAutopilot:
             },
         )
 
+    def _record_story_changes(self, story: StructuredStoryState) -> None:
+        current = set(story.active_flag_ids)
+        previous = self._last_story_flag_ids
+        self._last_story_flag_ids = current
+        self._last_story_digest = story.digest
+        if previous is None:
+            return
+
+        newly_active = current - previous
+        if not newly_active:
+            return
+        name_by_id = dict(zip(story.active_flag_ids, story.active_flags, strict=True))
+        for flag_id in sorted(newly_active):
+            flag_name = name_by_id.get(flag_id, f"FLAG_0x{flag_id:04X}")
+            if not flag_name.startswith(_STORY_PROGRESS_PREFIXES):
+                continue
+            self.evolve.record(
+                RewardKind.OBJECTIVE_PROGRESS,
+                magnitude=0.025,
+                token=f"ram-story-flag:{flag_id}",
+                metadata={
+                    "source": "structured_ram",
+                    "flag_id": flag_id,
+                    "flag_name": flag_name,
+                    "story_digest": story.digest,
+                },
+            )
+
     def _poll_structured_progress(self) -> bool:
         if not self.structured_navigation_active or self.structured_reader is None:
             return False
@@ -224,7 +294,37 @@ class CampaignAutopilot:
                 token="ram-main-story-cleared",
                 metadata={"source": "structured_ram"},
             )
+
+        # Story vars/flags are an optional enrichment. A parsing/network-cache
+        # failure must never disable exact map/X/Z navigation.
+        try:
+            self._record_story_changes(self.structured_reader.read_story_state())
+        except (OSError, GDBRemoteError, ValueError):
+            pass
         return progress.main_story_cleared
+
+    def _field_objects(self) -> tuple[StructuredFieldObject, ...]:
+        if not self.structured_navigation_active or self.structured_reader is None:
+            return ()
+        now = time.monotonic()
+        if now - self._last_object_poll < 1.25:
+            return self._cached_field_objects
+        self._last_object_poll = now
+        try:
+            objects = self.structured_reader.read_field_objects(current_map_only=True)
+        except (OSError, GDBRemoteError, ValueError):
+            return self._cached_field_objects
+        self._cached_field_objects = objects
+        return objects
+
+    @staticmethod
+    def _target_tile(location: StructuredLocation, action: DSButton) -> tuple[int, int]:
+        dx, dz = _DIRECTION_DELTAS[action]
+        return location.x + dx, location.z + dz
+
+    def _object_on_target_tile(self, location: StructuredLocation, action: DSButton) -> bool:
+        target = self._target_tile(location, action)
+        return any((obj.x, obj.z) == target for obj in self._field_objects())
 
     def _record_milestone(self, label: str, lines: list[str]) -> float:
         kind = _MILESTONES.get(label)
@@ -279,6 +379,8 @@ class CampaignAutopilot:
                 f" RAM: {structured.map_name}#{structured.map_header_id} "
                 f"({structured.x},{structured.z}) facing={structured.facing}."
             )
+        if self._last_story_digest is not None:
+            note += f" story={self._last_story_digest}."
         if lines:
             note += f" OCR: {' | '.join(lines[:20])}"
         record = self.scout.save(
@@ -307,6 +409,7 @@ class CampaignAutopilot:
         self._record_map_discovery(before)
         source_key = self.structured_navigator.key(before)
         action = self.structured_navigator.choose(source_key)
+        target_has_object = self._object_on_target_tile(before, action)
         self.emulator.press(action)
         time.sleep(max(0.12, self.poll_seconds))
         _frame, _next_screens, next_observation = self._snapshot()
@@ -323,6 +426,21 @@ class CampaignAutopilot:
         moved = self.structured_navigator.record_transition(before, action, after)
         self._record_map_discovery(after)
         self._blocked_streak = 0 if moved else self._blocked_streak + 1
+
+        # If exact coordinates did not change and a known persisted NPC/object
+        # occupies the target tile, try interaction immediately instead of
+        # teaching the pathfinder that it is merely a wall. The directional
+        # press has already faced the player toward that tile.
+        if not moved and target_has_object:
+            self.emulator.press(DSButton.A)
+            self._movement_since_interaction = 0
+            self._blocked_streak = 0
+            time.sleep(max(0.10, self.poll_seconds))
+            scene = detect_scene(
+                split_ds_screens(self.emulator.capture(), self.screen_layout)
+            ).scene
+            return 2, scene
+
         actions = 1 + self._maybe_interact_after_movement()
         if actions > 1:
             scene = detect_scene(
