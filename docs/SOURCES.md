@@ -8,13 +8,17 @@ The knowledge sync downloads public Renegade Platinum documentation at runtime a
 
 The repository does **not** include a Renegade Platinum ROM, a Pokemon Platinum ROM, BIOS/firmware, save files, savestates or extracted copyrighted game assets.
 
-## Pokemon / emulator engineering references
+## melonDS structured access
 
 - melonDS — https://github.com/melonDS-emu/melonDS
 - Pokemon Platinum decompilation — https://github.com/pret/pokeplatinum
 - Platinum Lua/QoL memory tooling — https://github.com/hzla/Pokemon-Lua
 
-These are useful for the planned read-only structured-state backend: map ID, player coordinates, facing, collisions/warps/objects and objective state where reliable symbols/structures can be identified.
+The v0.6 ARM9 backend uses melonDS' GDB stub and the standard GDB Remote Serial Protocol memory-read packet (`mADDR,LEN`). RenegadeAI deliberately does not expose memory/register write operations through this client.
+
+`pret/pokeplatinum` is the structural source for the validated `SaveData`/`SavePageInfo` layout, save-table IDs, `PlayerSave`, `TrainerInfo`, `FieldOverworldState`, `Location`, `VarsFlags`, `MapObjectSave`, generated map headers, and generated story flag/variable names. Pokemon-Lua is used as an independent cross-reference for language-specific Platinum runtime SaveData pointer locations.
+
+Runtime pointers are validated against Platinum structure invariants before RenegadeAI trusts them. Vision/OCR remains the verifier/fallback for unsupported or stale structured state.
 
 ## Autonomous Pokemon-agent references
 
@@ -28,4 +32,4 @@ These are useful for the planned read-only structured-state backend: map ID, pla
 
 These references informed architecture choices, not copied game assets. The recurring lesson is that long-horizon Pokemon completion works better as a hierarchy of structured state, objectives, pathfinding, memory, battle reasoning and recovery than as a single screenshot-to-button policy or pure reward maximizer.
 
-See `AUTOPLAY_RESEARCH.md` for the detailed design takeaways.
+See `AUTOPLAY_RESEARCH.md` and `STRUCTURED_MEMORY.md` for the detailed design takeaways.
