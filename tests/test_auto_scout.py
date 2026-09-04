@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 
-from renegade_ai.perception.scout import AutoCalibrationScout, CALIBRATION_NEEDS
+from renegade_ai.perception.scout import CALIBRATION_NEEDS, AutoCalibrationScout
 
 
 class FakeEmulator:
