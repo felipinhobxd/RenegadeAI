@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import platform
 import sys
+from pathlib import Path
 
 from renegade_ai import __version__
 from renegade_ai.actions import DSButton
@@ -75,7 +75,7 @@ def cmd_doctor(config_path: Path | None) -> int:
         observation = detect_scene(screens)
         print(f"Scene: {observation.scene.value} ({observation.confidence:.0%})")
         print(f"Scene metrics: {_format_metrics(observation.metrics)}")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - doctor should report dependency/OS failures
         print(f"melonDS: ERROR - {exc}")
         return 1
     print("Foundation + perception checks passed.")
