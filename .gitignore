@@ -13,6 +13,8 @@ captures/
 runs/
 data/*.db
 data/*.sqlite*
+data/knowledge/
+data/sprites/
 config.toml
 *.nds
 *.srl
