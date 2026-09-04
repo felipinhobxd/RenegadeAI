@@ -8,7 +8,6 @@ from pathlib import Path
 
 from renegade_ai.knowledge.models import MoveData, PokemonData, StrategyProfile
 
-
 DEFAULT_KNOWLEDGE_DIR = Path("data/knowledge")
 
 
@@ -49,7 +48,13 @@ class RenegadeDex:
 
         self._pokemon_aliases: dict[str, str] = {}
         for slug, pokemon in self.pokemon.items():
-            for alias in {slug, pokemon.name, pokemon.name.replace("♀", " female"), pokemon.name.replace("♂", " male")}:
+            aliases = {
+                slug,
+                pokemon.name,
+                pokemon.name.replace("♀", " female"),
+                pokemon.name.replace("♂", " male"),
+            }
+            for alias in aliases:
                 self._pokemon_aliases[normalize_name(alias)] = slug
 
         self._move_aliases: dict[str, str] = {}
