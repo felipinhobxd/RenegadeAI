@@ -14,6 +14,10 @@ runs/
 data/*.db
 data/*.sqlite*
 data/runtime_state.json
+data/battle_adaptive.json
+data/evolve_state.json
+data/evolve_qtable.json
+data/evolve_rewards.jsonl
 data/knowledge/
 data/sprites/
 config.toml
