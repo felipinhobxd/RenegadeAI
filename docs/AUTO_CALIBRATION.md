@@ -1,23 +1,22 @@
 # Autonomous calibration screenshot scout
 
-RenegadeAI can now collect the screenshots needed for new UI calibration itself.
+RenegadeAI can collect the screenshots needed for new UI calibration itself.
 
-## Recommended use
+## Normal v0.5 workflow: no scout command
 
-Start on the four-option battle command screen (`LUTAR / MOCHILA / FUGIR / POKEMON`) and run:
+When the Windows autoplay watcher is installed, calibration is part of the campaign loop. Open melonDS and load the game; the director automatically saves novel scenes and, at safe battle-command screens, can enter reversible menus to collect currently missing Bag/party calibration captures.
 
-```powershell
-renegade-ai scout
+Default output:
+
+```text
+captures/auto-calibration/
 ```
 
-The scout navigates only reversible calibration paths. It does **not**:
+The whole `captures/` directory is ignored by Git.
 
-- touch `FUGIR`;
-- select a battle move;
-- select/use a Bag item;
-- confirm a Pokemon switch.
+## What it can safely explore
 
-It currently captures and names:
+From the four-option battle command screen (`LUTAR / MOCHILA / FUGIR / POKEMON`) the scout can capture/name:
 
 ```text
 battle_command
@@ -31,7 +30,14 @@ battle_party
 party_slot_action_menu
 ```
 
-For every capture it writes:
+The calibration explorer does **not**:
+
+- touch `FUGIR`;
+- select a battle move;
+- select/use a Bag item;
+- confirm a Pokemon switch.
+
+For every capture it can write:
 
 ```text
 <target>__seen-<detected-scene>__<timestamp>.png
@@ -41,25 +47,11 @@ For every capture it writes:
 <target>__seen-<detected-scene>__<timestamp>.json
 ```
 
-A shared `manifest.json` records what was captured, what the classifier thought the screen was, its confidence/color metrics and which currently required targets are still missing.
+A shared `manifest.json` records what was captured, what the classifier thought the screen was, confidence/color metrics and which currently requested targets are still missing.
 
-Default output:
+## Semantic discovery
 
-```text
-captures/auto-calibration/
-```
-
-The whole `captures/` directory is ignored by Git.
-
-## Passive semantic discovery
-
-The scout can also watch normal gameplay and automatically save unknown/new scene transitions:
-
-```powershell
-renegade-ai scout --passive-only --watch-seconds 300
-```
-
-For an unknown screen it first runs OCR and tries to assign a useful semantic name. Current high-confidence semantic labels include:
+Unknown screens are OCR-scanned when useful. High-confidence text patterns can automatically assign labels such as:
 
 ```text
 bag_restore_list
@@ -75,7 +67,9 @@ boss_victory
 game_complete
 ```
 
-If OCR cannot safely identify the screen, it falls back to a calibration-inbox name:
+Campaign milestones can also feed ASI-Evolve rewards. Repeated frames are deduplicated so leaving a message visible does not repeatedly award the same event.
+
+If semantic evidence is insufficient, the capture is intentionally left as a calibration-inbox entry:
 
 ```text
 needed_unknown_001
@@ -83,18 +77,26 @@ needed_unknown_002
 ...
 ```
 
-This means new screens are preserved even when RenegadeAI does not understand them yet, while recognizable screens receive names based on what is actually visible instead of a manual filename.
+A cautious unknown label is preferable to teaching the agent the wrong screen meaning.
 
-Recognized campaign milestones are also connected to ASI-Evolve. Capture, level-up, evolution, badge, boss-victory and Hall of Fame/game-completion messages can create persistent rewards. Repeated frames of the same visible message are deduplicated; game completion is rewarded only once per learning profile.
+## Manual scout mode remains available
 
-You can combine active menu exploration with passive watching:
+For development/debugging, start on the battle command screen and run:
 
 ```powershell
-renegade-ai scout --watch-seconds 120
+renegade-ai scout
 ```
+
+Or passively watch normal gameplay:
+
+```powershell
+renegade-ai scout --passive-only --watch-seconds 300
+```
+
+These commands are optional in the v0.5 autoplay workflow.
 
 ## Safety behavior
 
-If the expected scene is not reached, the scout stores what it actually saw in metadata and only uses `B` to retreat through reversible menus. It does not guess by confirming unknown dialogs.
+If the expected scene is not reached, the scout stores what it actually saw in metadata and only uses reversible/back-out behavior. It does not guess by confirming unknown dialogs.
 
 This is intentional: a missing screenshot is preferable to spending a rare item, switching the wrong Pokemon or ending a battle while calibrating.
