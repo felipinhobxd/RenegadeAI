@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-import tomllib
 
 from renegade_ai.actions import DSButton
 
