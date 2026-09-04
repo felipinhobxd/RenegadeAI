@@ -159,9 +159,8 @@ class VisualTopoNavigator:
         seen = {state_key}
         while queue:
             key, first_action = queue.popleft()
-            if key != state_key and self._untried(key):
-                if first_action is not None:
-                    return first_action
+            if key != state_key and self._untried(key) and first_action is not None:
+                return first_action
             node = self.nodes.get(key)
             if node is None:
                 continue
