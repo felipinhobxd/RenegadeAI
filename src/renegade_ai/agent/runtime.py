@@ -18,13 +18,7 @@ class BattleRunResult:
 
 
 class BattleAutopilot:
-    """Pixel-driven battle loop for the first playable milestone.
-
-    The current policy is intentionally conservative: enter LUTAR and choose the
-    first move slot. It proves the full perception -> decision -> input loop on
-    stock melonDS. Rich move scoring will replace this policy once move/species
-    recognition is wired in.
-    """
+    """Pixel-driven battle loop for the first playable milestone."""
 
     def __init__(self, emulator: EmulatorAdapter, screen_layout: str = "vertical") -> None:
         self.emulator = emulator
@@ -47,14 +41,7 @@ class BattleAutopilot:
             if acted_scene is not None and scene != acted_scene:
                 acted_scene = None
 
-            if scene == SceneType.BATTLE_COMMAND:
-                saw_battle = True
-                if acted_scene is None:
-                    self.emulator.press(DSButton.A)
-                    actions += 1
-                    acted_scene = scene
-
-            elif scene == SceneType.MOVE_MENU:
+            if scene in {SceneType.BATTLE_COMMAND, SceneType.MOVE_MENU}:
                 saw_battle = True
                 if acted_scene is None:
                     self.emulator.press(DSButton.A)
