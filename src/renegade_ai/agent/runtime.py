@@ -93,6 +93,14 @@ class BattleAutopilot:
             f"{best.move.name} score={best.score:.1f}; {best.reason}"
         )
 
+    def _enter_fight(self) -> None:
+        if self.smart:
+            from renegade_ai.agent.battle_controls import BattleCommand, touch_battle_command
+
+            touch_battle_command(self.emulator, BattleCommand.FIGHT)
+        else:
+            self.emulator.press(DSButton.A)
+
     def run(self, *, max_seconds: float = 120.0, poll_seconds: float = 0.18) -> BattleRunResult:
         started = time.monotonic()
         actions = 0
@@ -114,12 +122,12 @@ class BattleAutopilot:
             if scene == SceneType.BATTLE_COMMAND:
                 saw_battle = True
                 if acted_scene is None:
-                    # A selects LUTAR. Bag/party/run will become deliberate planner
-                    # actions after their screens are calibrated from real captures.
-                    self.emulator.press(DSButton.A)
+                    # Bag/party/run become deliberate planner actions after their
+                    # contents are calibrated from real Renegade captures.
+                    self._enter_fight()
                     actions += 1
                     acted_scene = scene
-                    last_decision = "enter LUTAR"
+                    last_decision = "enter LUTAR/FIGHT"
 
             elif scene == SceneType.MOVE_MENU:
                 saw_battle = True
