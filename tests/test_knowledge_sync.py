@@ -1,6 +1,5 @@
 from renegade_ai.knowledge.sync import parse_pokemon_page
 
-
 PAGE = """# Testmon
 
 <div class="pokemon-hero">
