@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 # Attacking type -> defending type -> multiplier. Missing entries are neutral.
 _CHART: dict[str, dict[str, float]] = {
     "normal": {"rock": 0.5, "ghost": 0.0, "steel": 0.5},
