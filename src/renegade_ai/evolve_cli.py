@@ -52,7 +52,7 @@ def cmd_status() -> int:
 
 def cmd_battle(config_path: Path | None, max_seconds: float, poll_seconds: float) -> int:
     from renegade_ai.agent.runtime import BattleAutopilot
-    from renegade_ai.knowledge.dex import RenegadeDex
+    from renegade_ai.knowledge.bootstrap import ensure_renegade_dex
     from renegade_ai.perception.battle_vision import BattleVision
     from renegade_ai.state.runtime import RuntimeStateStore
 
@@ -65,10 +65,13 @@ def cmd_battle(config_path: Path | None, max_seconds: float, poll_seconds: float
         alpha=config.learning.alpha,
         evolve_engine=evolve,
     )
+    # First-run bootstrap is automatic. This is intentionally done before the
+    # battle loop so a user can simply start autonomous mode on a clean clone.
+    dex = ensure_renegade_dex()
     autopilot = BattleAutopilot(
         adapter,
         config.capture.screen_layout,
-        dex=RenegadeDex(),
+        dex=dex,
         vision=BattleVision(),
         state_store=RuntimeStateStore(),
         adaptive_memory=memory,
