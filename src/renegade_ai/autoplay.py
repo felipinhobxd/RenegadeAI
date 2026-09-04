@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+from renegade_ai.cli import make_adapter
+from renegade_ai.knowledge.bootstrap import ensure_renegade_dex
+from renegade_ai.learning.evolve import ASIEvolveEngine
+
+
+def _log(message: str, *, path: Path = Path("runs/autoplay.log")) -> None:
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    line = f"[{timestamp}] {message}"
+    print(line, flush=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="renegade-ai-autoplay",
+        description=(
+            "Background RenegadeAI director. Waits for melonDS and starts the autonomous "
+            "campaign automatically when the game window appears."
+        ),
+    )
+    parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--wait-seconds", type=float, default=2.0)
+    parser.add_argument("--poll-seconds", type=float, default=0.18)
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run one melonDS session and exit instead of waiting for the emulator again.",
+    )
+    return parser
+
+
+def _wait_for_melonds(config_path: Path | None, wait_seconds: float):
+    config, adapter = make_adapter(config_path)
+    announced = False
+    while True:
+        try:
+            window = adapter.locate()
+            _log(f"melonDS detected: {window.title!r} ({window.width}x{window.height})")
+            return config, adapter
+        except RuntimeError:
+            if not announced:
+                _log("Waiting for melonDS. Open the emulator and load Renegade Platinum.")
+                announced = True
+            time.sleep(max(0.5, wait_seconds))
+
+
+def run_daemon(
+    *,
+    config_path: Path | None = None,
+    wait_seconds: float = 2.0,
+    poll_seconds: float = 0.18,
+    once: bool = False,
+) -> int:
+    while True:
+        config, adapter = _wait_for_melonds(config_path, wait_seconds)
+        try:
+            dex = ensure_renegade_dex(reporter=_log)
+            from renegade_ai.campaign.runtime import CampaignAutopilot
+
+            evolve = ASIEvolveEngine(
+                qtable_path=config.learning.qtable.with_name("evolve_qtable.json"),
+            )
+            campaign = CampaignAutopilot(
+                adapter,
+                config.capture.screen_layout,
+                dex=dex,
+                evolve_engine=evolve,
+                poll_seconds=poll_seconds,
+            )
+            _log(
+                "Autonomous campaign started: screenshots/scouting, exploration, dialogue "
+                "handling, battles and ASI-Evolve are active."
+            )
+            result = campaign.run()
+            _log(
+                "Campaign session stopped: "
+                f"completed={result.completed} steps={result.steps} battles={result.battles} "
+                f"captures={result.captures} reason={result.reason}"
+            )
+            if result.completed:
+                _log("Game completion detected. Autoplay will stop for this playthrough.")
+                return 0
+        except KeyboardInterrupt:
+            _log("Autoplay stopped by user.")
+            return 130
+        except Exception as exc:  # CLI/daemon boundary: keep background watcher alive.
+            _log(f"Autoplay session error: {type(exc).__name__}: {exc}")
+            time.sleep(max(2.0, wait_seconds))
+
+        if once:
+            return 0
+        _log("melonDS session ended or failed; waiting for the game to appear again.")
+        time.sleep(max(0.5, wait_seconds))
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    code = run_daemon(
+        config_path=args.config,
+        wait_seconds=args.wait_seconds,
+        poll_seconds=args.poll_seconds,
+        once=args.once,
+    )
+    raise SystemExit(code)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
