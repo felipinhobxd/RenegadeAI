@@ -80,6 +80,8 @@ class BattleAutopilot:
             list(state.moves),
             own_hp=state.own_hp_fraction or 1.0,
             opponent_hp=state.opponent_hp_fraction or 1.0,
+            own_level=state.own_level or 50,
+            opponent_level=state.opponent_level or 50,
         )
         if not ranked:
             self.emulator.press(DSButton.A)
