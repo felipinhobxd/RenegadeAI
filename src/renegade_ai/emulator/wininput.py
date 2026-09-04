@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import sys
 import time
 
@@ -9,6 +10,7 @@ KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 MAPVK_VK_TO_VSC = 0
+INPUT_KEYBOARD = 1
 
 _NAMED_VK: dict[str, int] = {
     "backspace": 0x08,
@@ -27,6 +29,46 @@ _NAMED_VK: dict[str, int] = {
 }
 
 _EXTENDED = {"left", "up", "right", "down", "delete"}
+
+ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
+class INPUTUNION(ctypes.Union):
+    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _anonymous_ = ("union",)
+    _fields_ = [("type", wintypes.DWORD), ("union", INPUTUNION)]
 
 
 def _virtual_key(key: str) -> int:
@@ -48,45 +90,36 @@ def _send_scan(scan_code: int, *, key_up: bool, extended: bool) -> None:
     if sys.platform != "win32":
         raise RuntimeError("Native Windows input is only available on Windows")
 
-    user32 = ctypes.windll.user32
-
-    ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
-
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_ = [
-            ("wVk", ctypes.c_ushort),
-            ("wScan", ctypes.c_ushort),
-            ("dwFlags", ctypes.c_ulong),
-            ("time", ctypes.c_ulong),
-            ("dwExtraInfo", ULONG_PTR),
-        ]
-
-    class INPUTUNION(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT)]
-
-    class INPUT(ctypes.Structure):
-        _anonymous_ = ("union",)
-        _fields_ = [("type", ctypes.c_ulong), ("union", INPUTUNION)]
-
     flags = KEYEVENTF_SCANCODE
     if extended:
         flags |= KEYEVENTF_EXTENDEDKEY
     if key_up:
         flags |= KEYEVENTF_KEYUP
 
-    packet = INPUT(type=1, ki=KEYBDINPUT(0, scan_code, flags, 0, 0))
+    packet = INPUT(
+        type=INPUT_KEYBOARD,
+        ki=KEYBDINPUT(
+            wVk=0,
+            wScan=scan_code,
+            dwFlags=flags,
+            time=0,
+            dwExtraInfo=0,
+        ),
+    )
+    user32 = ctypes.windll.user32
     sent = user32.SendInput(1, ctypes.byref(packet), ctypes.sizeof(INPUT))
     if sent != 1:
         raise OSError(ctypes.get_last_error(), "Windows SendInput failed")
 
 
 def press_key(key: str, seconds: float) -> None:
-    """Send one physical-looking keyboard press using Windows scan codes.
+    """Send one keyboard press with Windows scan codes.
 
-    melonDS is a desktop application, but directional input can be less reliable
-    through high-level automation libraries. Scan-code input is closer to a real
-    keyboard event and is therefore preferred on Windows.
+    Directional keys are marked as extended keys. This is more reliable for
+    melonDS than relying only on a high-level automation library.
     """
+    if sys.platform != "win32":
+        raise RuntimeError("Native Windows input is only available on Windows")
 
     normalized = key.strip().lower()
     vk = _virtual_key(normalized)
