@@ -8,16 +8,11 @@ from renegade_ai.actions import DSButton
 from renegade_ai.config import CaptureConfig, MelonDSConfig
 from renegade_ai.emulator.base import EmulatorAdapter, EmulatorWindow
 
-
 _DPAD = {DSButton.UP, DSButton.DOWN, DSButton.LEFT, DSButton.RIGHT}
 
 
 class DesktopMelonDSAdapter(EmulatorAdapter):
-    """Control stock melonDS through its desktop window.
-
-    This deliberately avoids relying on experimental emulator scripting. It is
-    the compatibility backend: keyboard input in, pixels out.
-    """
+    """Control stock melonDS through its desktop window."""
 
     def __init__(self, melonds: MelonDSConfig, capture: CaptureConfig):
         self.config = melonds
