@@ -4,7 +4,6 @@ from collections import defaultdict
 
 from renegade_ai.knowledge.models import MoveData, PokemonData, StrategyProfile
 
-
 _SETUP_MOVES = {
     "belly-drum": 46.0,
     "calm-mind": 36.0,
@@ -115,11 +114,21 @@ def _nature_and_evs(pokemon: PokemonData, role: str, offense: str) -> tuple[str,
     if offense == "physical":
         nature = "Jolly" if fast else "Adamant"
         evs = "252 Atk / 252 Spe / 4 HP" if fast else "252 Atk / 252 HP / 4 Spe"
-        item = "Life Orb" if "sweeper" in role else "Choice Band" if role == "breaker" else "Leftovers"
+        if "sweeper" in role:
+            item = "Life Orb"
+        elif role == "breaker":
+            item = "Choice Band"
+        else:
+            item = "Leftovers"
     elif offense == "special":
         nature = "Timid" if fast else "Modest"
         evs = "252 SpA / 252 Spe / 4 HP" if fast else "252 SpA / 252 HP / 4 Spe"
-        item = "Life Orb" if "sweeper" in role else "Choice Specs" if role == "breaker" else "Leftovers"
+        if "sweeper" in role:
+            item = "Life Orb"
+        elif role == "breaker":
+            item = "Choice Specs"
+        else:
+            item = "Leftovers"
     else:
         nature = "Naive" if fast else "Quiet"
         evs = "252 Spe / 128 Atk / 128 SpA" if fast else "252 HP / 128 Atk / 128 SpA"
@@ -152,7 +161,6 @@ def _damage_score(pokemon: PokemonData, move: MoveData, offense: str) -> float:
     else:
         alignment = 1.08
 
-    # Mildly prefer coverage after STAB; move diversity is handled separately.
     coverage = 1.04 if stab == 1.0 else 1.0
     return move.power * accuracy * stab * alignment * coverage
 
@@ -173,7 +181,6 @@ def _ideal_moves(
         if _damage_score(pokemon, move, offense) < 0:
             continue
         move_type = move.type.lower()
-        # Keep one excellent duplicate STAB only when it materially beats coverage.
         if move_type in used_types and len(chosen) >= 2:
             continue
         chosen.append(move)
@@ -184,11 +191,17 @@ def _ideal_moves(
     status_scores: dict[str, float] = defaultdict(float)
     for slug in learnable:
         if slug in _SETUP_MOVES:
-            status_scores[slug] = _SETUP_MOVES[slug] + (8 if "sweeper" in role or role == "breaker" else 0)
+            status_scores[slug] = _SETUP_MOVES[slug] + (
+                8 if "sweeper" in role or role == "breaker" else 0
+            )
         if slug in _RECOVERY_MOVES:
-            status_scores[slug] = max(status_scores[slug], 46 if "wall" in role or "bulky" in role else 30)
+            status_scores[slug] = max(
+                status_scores[slug], 46 if "wall" in role or "bulky" in role else 30
+            )
         if slug in _UTILITY_MOVES:
-            status_scores[slug] = max(status_scores[slug], 40 if "utility" in role or "wall" in role else 24)
+            status_scores[slug] = max(
+                status_scores[slug], 40 if "utility" in role or "wall" in role else 24
+            )
 
     if status_scores:
         best_status = max(status_scores, key=status_scores.get)
