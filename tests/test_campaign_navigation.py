@@ -29,7 +29,21 @@ def test_visual_navigator_marks_unchanged_direction_blocked(tmp_path):
     navigator.record_transition(state, DSButton.UP, state)
 
     assert "up" in navigator.nodes[state].blocked
-    assert navigator.choose(state) == DSButton.RIGHT
+    assert navigator.choose(state) != DSButton.UP
+
+
+def test_visual_navigator_balances_global_direction_usage(tmp_path):
+    navigator = VisualTopoNavigator(tmp_path / "map.json")
+    first = navigator.observe(image(0))
+    second = navigator.observe(image(96))
+
+    navigator.record_transition(first, DSButton.UP, second)
+    choice = navigator.choose(second)
+
+    # A brand-new visual state should not blindly repeat UP after UP has already
+    # accumulated more global usage than the other directions.
+    assert choice != DSButton.UP
+    assert choice in {DSButton.RIGHT, DSButton.DOWN, DSButton.LEFT}
 
 
 def test_visual_navigator_routes_to_nearest_frontier(tmp_path):
@@ -37,13 +51,10 @@ def test_visual_navigator_routes_to_nearest_frontier(tmp_path):
     first = navigator.observe(image(0))
     second = navigator.observe(image(96))
 
-    # Exhaust the current node but leave the second node unexplored.
-    navigator.nodes[first].attempts = {button.value: 1 for button in (
-        DSButton.UP,
-        DSButton.RIGHT,
-        DSButton.DOWN,
-        DSButton.LEFT,
-    )}
+    navigator.nodes[first].attempts = {
+        button.value: 1
+        for button in (DSButton.UP, DSButton.RIGHT, DSButton.DOWN, DSButton.LEFT)
+    }
     navigator.nodes[first].edges["right"] = second
 
     assert navigator.choose(first) == DSButton.RIGHT
