@@ -1,5 +1,4 @@
-import renegade_ai.knowledge.bootstrap as bootstrap
-import renegade_ai.knowledge.sync as sync_module
+from renegade_ai.knowledge import bootstrap, sync as sync_module
 
 
 def test_ensure_renegade_dex_auto_syncs_once(monkeypatch):
