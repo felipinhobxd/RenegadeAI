@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from renegade_ai.campaign.pathfinding import GridPoint
-from renegade_ai.memory.platinum import MapHeaderCatalog, POKEPLATINUM_COMMIT
+from renegade_ai.memory.platinum import POKEPLATINUM_COMMIT, MapHeaderCatalog
 
 _RAW_ROOT = (
     "https://raw.githubusercontent.com/pret/pokeplatinum/"
@@ -126,7 +126,11 @@ class PlatinumWorldModel:
             return
         matrices = payload.get("matrices", {})
         if isinstance(matrices, dict):
-            self._matrices = {int(key): value for key, value in matrices.items() if isinstance(value, dict)}
+            self._matrices = {
+                int(key): value
+                for key, value in matrices.items()
+                if isinstance(value, dict)
+            }
         self._rebuild_indexes()
 
     def _save_index(self) -> None:
@@ -146,12 +150,7 @@ class PlatinumWorldModel:
         return matrix_id, self._fetch_json(self._matrix_url(matrix_id))
 
     def ensure_matrix_index(self) -> bool:
-        """Build the map-header/matrix graph once and cache it locally.
-
-        There are 289 tiny matrix JSON files. Fetching them concurrently is a
-        one-time bootstrap; subsequent launches use ``data/world/matrix_index.json``.
-        Partial network failures are tolerated and can be filled on a later run.
-        """
+        """Build the map-header/matrix graph once and cache it locally."""
         if len(self._matrices) >= _MATRIX_COUNT:
             return True
         missing = [index for index in range(_MATRIX_COUNT) if index not in self._matrices]
@@ -162,7 +161,7 @@ class PlatinumWorldModel:
             for future in as_completed(futures):
                 try:
                     matrix_id, payload = future.result()
-                except Exception:  # noqa: BLE001 - public-data bootstrap is best effort.
+                except Exception:  # noqa: BLE001, S112 - public cache is best effort.
                     continue
                 if payload is not None and "land_data_maps" in payload:
                     self._matrices[matrix_id] = payload
@@ -212,7 +211,11 @@ class PlatinumWorldModel:
                         if not isinstance(neighbor_row, list) or cc >= len(neighbor_row):
                             continue
                         neighbor = self._header_value(neighbor_row[cc])
-                        if neighbor is None or neighbor in _INVALID_HEADERS or neighbor == header_id:
+                        if (
+                            neighbor is None
+                            or neighbor in _INVALID_HEADERS
+                            or neighbor == header_id
+                        ):
                             continue
                         self._adjacency.setdefault(header_id, set()).add(neighbor)
 
@@ -224,8 +227,6 @@ class PlatinumWorldModel:
         for cell in candidates:
             if cell.row == row and cell.col == col:
                 return cell
-        # Interiors generally use local 0..31 coordinates and a single-cell
-        # matrix. In that case the sole matching header cell is authoritative.
         if len(candidates) == 1:
             return candidates[0]
         return None
@@ -337,7 +338,7 @@ class PlatinumWorldModel:
         )
 
     def map_neighbors(self, header_id: int) -> set[int]:
-        if header_id not in self._adjacency:
+        if header_id not in self._adjacency and not self._matrices:
             self.ensure_matrix_index()
         neighbors = set(self._adjacency.get(header_id, set()))
         neighbors.update(warp.destination_header_id for warp in self.warps(header_id))
@@ -352,7 +353,8 @@ class PlatinumWorldModel:
     ) -> list[int] | None:
         if start_header_id in goal_header_ids:
             return [start_header_id]
-        self.ensure_matrix_index()
+        if not self._matrices:
+            self.ensure_matrix_index()
         queue: deque[int] = deque([start_header_id])
         parent: dict[int, int | None] = {start_header_id: None}
         while queue and len(parent) <= max_maps:
@@ -376,7 +378,10 @@ class PlatinumWorldModel:
     def _boundary_portals(self, source_id: int, destination_id: int) -> list[BoundaryPortal]:
         portals: list[BoundaryPortal] = []
         source_cells = self._header_cells.get(source_id, ())
-        destination_cells = {(cell.matrix_id, cell.row, cell.col): cell for cell in self._header_cells.get(destination_id, ())}
+        destination_cells = {
+            (cell.matrix_id, cell.row, cell.col): cell
+            for cell in self._header_cells.get(destination_id, ())
+        }
         for source_cell in source_cells:
             for dr, dc in ((-1, 0), (0, 1), (1, 0), (0, -1)):
                 destination_cell = destination_cells.get(
@@ -415,7 +420,8 @@ class PlatinumWorldModel:
         ]
         if event_portals:
             return tuple(event_portals)
-        self.ensure_matrix_index()
+        if not self._matrices:
+            self.ensure_matrix_index()
         return tuple(self._boundary_portals(source_header_id, destination_header_id))
 
     def nearest_portal(
