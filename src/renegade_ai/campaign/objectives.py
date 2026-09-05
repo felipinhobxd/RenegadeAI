@@ -55,18 +55,29 @@ class StoryObjectivePlanner:
         if progress.main_story_cleared:
             return None
 
-        # Before the first badge the game contains several mandatory setup
-        # events. Using visited maps + the Roark story flag prevents the agent
-        # from aiming at the Gym before its leader has returned from the mine.
+        # Exact persistent flags are preferred over exploration history for the
+        # opening. This matters when RenegadeAI is attached to an existing save:
+        # it must not walk back to Sandgem merely because its own map cache was
+        # created after the Pokedex was already obtained.
         if badges == 0:
-            if not self._visited(visited, "SANDGEM_TOWN", "JUBILIFE_CITY", "OREBURGH_CITY"):
+            if not self._has_flag(story, "FLAG_HAS_POKEDEX"):
                 return self._remember(
                     StoryObjective(
-                        "reach_sandgem",
-                        "Reach Sandgem Town and complete the Professor/Pokedex setup",
-                        ("SANDGEM_TOWN",),
+                        "get_pokedex",
+                        "Complete Professor Rowan's lab sequence and obtain the Pokedex",
+                        ("SANDGEM_TOWN_POKEMON_RESEARCH_LAB",),
                         interact=True,
-                        target_hint="Professor Rowan / laboratory progression",
+                        target_hint="PROF_ROWAN",
+                    )
+                )
+            if not self._has_flag(story, "FLAG_JOURNAL_ACQUIRED"):
+                return self._remember(
+                    StoryObjective(
+                        "return_home_for_journal",
+                        "Return home after receiving the Pokedex and get the Journal",
+                        ("TWINLEAF_TOWN_PLAYER_HOUSE_1F",),
+                        interact=True,
+                        target_hint="MOM",
                     )
                 )
             if not self._visited(visited, "JUBILIFE_CITY", "OREBURGH_CITY"):
@@ -285,7 +296,12 @@ class StoryObjectivePlanner:
                         interact=True,
                     )
                 )
-            if not self._visited(visited, "SPEAR_PILLAR", "DISTORTION_WORLD_1F", "SUNYSHORE_CITY"):
+            if not self._visited(
+                visited,
+                "SPEAR_PILLAR",
+                "DISTORTION_WORLD_1F",
+                "SUNYSHORE_CITY",
+            ):
                 return self._remember(
                     StoryObjective(
                         "spear_pillar",
