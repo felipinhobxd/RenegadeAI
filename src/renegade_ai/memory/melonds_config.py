@@ -107,7 +107,11 @@ def _upsert_table(text: str, table: str, values: dict[str, str]) -> str:
 def _desired_debugger_text(original: str) -> str:
     updated = _upsert_table(original, "JIT", {"Enable": "false"})
     for prefix in ("Gdb", "Instance0.Gdb"):
-        updated = _upsert_table(updated, prefix, {"Enabled": "true"})
+        # Current melonDS uses `Enabled`; older 1.0-era builds had releases where
+        # users reported `Enable` being required in the TOML. Keeping both true
+        # is harmless to the TOML parser and makes the one-time setup compatible
+        # across those builds without guessing which executable the user has.
+        updated = _upsert_table(updated, prefix, {"Enabled": "true", "Enable": "true"})
         updated = _upsert_table(
             updated,
             f"{prefix}.ARM9",
