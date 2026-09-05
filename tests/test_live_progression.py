@@ -15,6 +15,9 @@ class FakeWorld:
     def portals_between(self, _source: int, _destination: int):
         return ()
 
+    def map_neighbors(self, _source: int) -> set[int]:
+        return set()
+
 
 def loc(map_id: int, x: int, z: int) -> StructuredLocation:
     return StructuredLocation(
@@ -65,3 +68,12 @@ def test_live_progression_astar_routes_to_observed_warp_source(tmp_path):
     assert decision is not None
     assert decision.action == DSButton.RIGHT
     assert decision.path_length == 2
+
+
+def test_combined_map_route_can_use_only_live_renegade_transitions(tmp_path):
+    navigator = StructuredGridNavigator(tmp_path / "map.json")
+    navigator.nodes["3:5:5"] = GridNode(edges={"right": "4:2:8"})
+    navigator.nodes["4:2:8"] = GridNode(edges={"up": "5:9:9"})
+
+    director = LiveProgressionDirector(world=FakeWorld())
+    assert director._combined_map_route(3, {5}, navigator) == [3, 4, 5]
