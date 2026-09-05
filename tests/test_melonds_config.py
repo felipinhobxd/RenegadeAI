@@ -12,6 +12,10 @@ def test_patch_melonds_toml_is_idempotent(tmp_path):
     assert "Enable = false" in text
     assert "[Gdb]" in text
     assert "Enabled = true" in text
+    # Compatibility with melonDS builds affected by the historical GDB config
+    # key mismatch: both spellings are emitted in the Gdb table.
+    gdb_table = text.split("[Gdb]", 1)[1].split("[", 1)[0]
+    assert "Enable = true" in gdb_table
     assert "[Instance0.Gdb.ARM9]" in text
     assert "Port = 3333" in text
     assert "BreakOnStartup = false" in text
