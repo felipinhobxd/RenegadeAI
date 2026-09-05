@@ -147,8 +147,22 @@ def run_daemon(
                 evolve_engine=evolve,
                 poll_seconds=poll_seconds,
             )
+
+            if structured_reader is not None:
+                _log(
+                    "Preparing objective navigation world cache: map matrices, real "
+                    "collision blocks and warp graph. This is cached after the first run."
+                )
+                complete_world = campaign.progression.world.ensure_matrix_index()
+                world_stats = campaign.progression.world.stats()
+                _log(
+                    "World planner ready: "
+                    f"completeMatrixIndex={complete_world}, stats={world_stats}. "
+                    "Missing static data, if any, falls back to live RAM/vision exploration."
+                )
+
             mode = (
-                "structured RAM + balanced frontier navigation"
+                "structured RAM + story objectives + collision/warps + A*"
                 if structured_reader is not None
                 else "balanced vision/OCR fallback"
             )
