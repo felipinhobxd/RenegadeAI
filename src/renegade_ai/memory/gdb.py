@@ -35,11 +35,23 @@ def decode_memory_payload(payload: str, expected: int | None = None) -> bytes:
 
 
 class GDBRemoteClient:
-    """Tiny read-only GDB Remote Serial Protocol client for melonDS ARM9.
+    """Small read-only GDB RSP client specialized for melonDS ARM9.
 
-    Public operations expose memory reads only. The target is interrupted for
-    a short read transaction and immediately resumed. No memory/register write
-    packet is implemented by this class.
+    melonDS' GDB stub deliberately holds the emulated CPU in its debugger loop
+    when a new debugger connection is accepted until the client sends a
+    ``continue`` command. Older RenegadeAI versions also sent Ctrl-C around
+    *every* memory read. That made attaching to an already-running game visibly
+    freeze or stutter the emulator and, if the connection failed mid-transaction,
+    could leave the game apparently stuck.
+
+    The default mode here is therefore *non-stop reads*: after the melonDS
+    handshake we immediately send ``continue`` and ordinary ``m`` memory packets
+    are served while the target keeps running. melonDS handles those packets in
+    its normal GDB polling path. Explicit halting remains available only through
+    :meth:`paused` (or ``halt_reads=True`` for diagnostics).
+
+    Public operations still expose memory reads only; this class implements no
+    memory/register write API.
     """
 
     def __init__(
@@ -48,25 +60,64 @@ class GDBRemoteClient:
         port: int = 3333,
         *,
         timeout: float = 1.5,
+        halt_reads: bool = False,
     ) -> None:
         self.host = host
         self.port = int(port)
         self.timeout = float(timeout)
+        self.halt_reads = bool(halt_reads)
         self.sock: socket.socket | None = None
         self.max_read = 512
         self._stopped = False
         self._pause_depth = 0
+        self.read_requests = 0
+        self.bytes_read = 0
+        self.interrupt_count = 0
 
     @property
     def connected(self) -> bool:
         return self.sock is not None
+
+    def _fail_open_close(self) -> None:
+        """Best-effort resume before dropping a half-open debugger connection."""
+        sock = self.sock
+        if sock is None:
+            return
+        try:
+            # The leading '+' is harmless after the handshake and is important
+            # if melonDS is still waiting for its connection acknowledgement.
+            sock.sendall(b"+" + encode_packet("c"))
+        except OSError:
+            pass
+        try:
+            sock.close()
+        finally:
+            self.sock = None
+            self._stopped = False
+            self._pause_depth = 0
 
     def connect(self) -> None:
         if self.sock is not None:
             return
         self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
         self.sock.settimeout(self.timeout)
-        with self.paused():
+        try:
+            # melonDS performs a small connection-level '+' handshake before it
+            # starts parsing normal RSP packets. Do this explicitly instead of
+            # accidentally satisfying it with Ctrl-C as older code did.
+            self._socket().sendall(b"+")
+            server_ack = self._recv_exact(1)
+            if server_ack != b"+":
+                raise GDBRemoteError(
+                    f"Unexpected melonDS GDB handshake byte: {server_ack!r}"
+                )
+
+            # A newly accepted debugger connection makes melonDS stay inside the
+            # GDB stub until Continue/Step/Disconnect. Resume *before* asking for
+            # capabilities so attaching to a live game cannot pin the CPU.
+            self._send_packet("c")
+            self._stopped = False
+
             supported = self._request("qSupported")
             for part in supported.split(";"):
                 if part.startswith("PacketSize="):
@@ -75,6 +126,9 @@ class GDBRemoteClient:
                     except ValueError:
                         continue
                     self.max_read = max(32, min(512, (packet_size - 32) // 2))
+        except (OSError, GDBRemoteError):
+            self._fail_open_close()
+            raise
 
     def close(self) -> None:
         if self.sock is None:
@@ -83,7 +137,9 @@ class GDBRemoteClient:
             if self._stopped:
                 self.resume()
         except (OSError, GDBRemoteError):
-            pass
+            # If a normal resume fails, still try the fail-open raw Continue.
+            self._fail_open_close()
+            return
         try:
             self.sock.close()
         finally:
@@ -161,6 +217,7 @@ class GDBRemoteClient:
     def interrupt(self) -> str:
         if self._stopped:
             return "already-stopped"
+        self.interrupt_count += 1
         self._socket().sendall(b"\x03")
         response = self._read_packet()
         if not response.startswith(("S", "T")):
@@ -187,20 +244,33 @@ class GDBRemoteClient:
             if outer and self._pause_depth == 0:
                 self.resume()
 
+    def _read_memory_chunks(self, address: int, length: int) -> bytes:
+        result = bytearray()
+        offset = 0
+        while offset < length:
+            size = min(self.max_read, length - offset)
+            payload = self._request(f"m{address + offset:x},{size:x}")
+            result.extend(decode_memory_payload(payload, size))
+            self.read_requests += 1
+            self.bytes_read += size
+            offset += size
+        return bytes(result)
+
     def read_memory(self, address: int, length: int) -> bytes:
         if address < 0 or length < 0:
             raise ValueError("address and length must be non-negative")
         if length == 0:
             return b""
-        result = bytearray()
-        with self.paused():
-            offset = 0
-            while offset < length:
-                size = min(self.max_read, length - offset)
-                payload = self._request(f"m{address + offset:x},{size:x}")
-                result.extend(decode_memory_payload(payload, size))
-                offset += size
-        return bytes(result)
+        try:
+            if self.halt_reads:
+                with self.paused():
+                    return self._read_memory_chunks(address, length)
+            return self._read_memory_chunks(address, length)
+        except (OSError, GDBRemoteError):
+            # A broken debugger transport must never be allowed to leave the
+            # emulator stopped. Drop structured state and let vision take over.
+            self._fail_open_close()
+            raise
 
     def read_u8(self, address: int) -> int:
         return self.read_memory(address, 1)[0]
@@ -213,3 +283,12 @@ class GDBRemoteClient:
 
     def read_i32(self, address: int) -> int:
         return struct.unpack("<i", self.read_memory(address, 4))[0]
+
+    def diagnostics(self) -> dict[str, int | bool]:
+        return {
+            "connected": self.connected,
+            "halt_reads": self.halt_reads,
+            "read_requests": self.read_requests,
+            "bytes_read": self.bytes_read,
+            "interrupt_count": self.interrupt_count,
+        }
