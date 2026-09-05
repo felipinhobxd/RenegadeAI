@@ -12,6 +12,7 @@ class MelonDSDebugConfigResult:
     paths: tuple[Path, ...]
     changed: tuple[Path, ...]
     restart_required: bool
+    deferred: tuple[Path, ...] = ()
 
     @property
     def configured(self) -> bool:
@@ -103,12 +104,8 @@ def _upsert_table(text: str, table: str, values: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def patch_melonds_toml(path: str | Path) -> bool:
-    """Enable read-only ARM9 GDB access and disable JIT (required by melonDS)."""
-    path = Path(path)
-    original = path.read_text(encoding="utf-8")
-    updated = original
-    updated = _upsert_table(updated, "JIT", {"Enable": "false"})
+def _desired_debugger_text(original: str) -> str:
+    updated = _upsert_table(original, "JIT", {"Enable": "false"})
     for prefix in ("Gdb", "Instance0.Gdb"):
         updated = _upsert_table(updated, prefix, {"Enabled": "true"})
         updated = _upsert_table(
@@ -121,6 +118,20 @@ def patch_melonds_toml(path: str | Path) -> bool:
             f"{prefix}.ARM7",
             {"Port": "3334", "BreakOnStartup": "false"},
         )
+    return updated
+
+
+def debugger_patch_needed(path: str | Path) -> bool:
+    path = Path(path)
+    original = path.read_text(encoding="utf-8")
+    return _desired_debugger_text(original) != original
+
+
+def patch_melonds_toml(path: str | Path) -> bool:
+    """Enable read-only ARM9 GDB access and disable JIT (required by melonDS)."""
+    path = Path(path)
+    original = path.read_text(encoding="utf-8")
+    updated = _desired_debugger_text(original)
     if updated == original:
         return False
 
@@ -135,6 +146,26 @@ def patch_melonds_toml(path: str | Path) -> bool:
 
 def configure_melonds_debugger() -> MelonDSDebugConfigResult:
     paths = tuple(discover_melonds_toml())
+
+    # Never rewrite the emulator's configuration underneath a live game. On a
+    # first-time setup performed while melonDS is already open, defer the patch
+    # until the process has closed. If the file is already configured, attaching
+    # to the existing GDB endpoint is still fine and no restart is requested.
+    if _running_melonds_executable() is not None:
+        deferred: list[Path] = []
+        for path in paths:
+            try:
+                if debugger_patch_needed(path):
+                    deferred.append(path)
+            except OSError:
+                continue
+        return MelonDSDebugConfigResult(
+            paths=paths,
+            changed=(),
+            restart_required=False,
+            deferred=tuple(deferred),
+        )
+
     changed: list[Path] = []
     for path in paths:
         try:
@@ -146,4 +177,5 @@ def configure_melonds_debugger() -> MelonDSDebugConfigResult:
         paths=paths,
         changed=tuple(changed),
         restart_required=bool(changed),
+        deferred=(),
     )
