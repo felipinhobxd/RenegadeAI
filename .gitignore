@@ -20,6 +20,8 @@ data/evolve_qtable.json
 data/evolve_rewards.jsonl
 data/campaign_map.json
 data/structured_map.json
+data/campaign_outcomes.json
+data/memory_profile.json
 data/world/
 data/knowledge/
 data/sprites/
