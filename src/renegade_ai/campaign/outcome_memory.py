@@ -31,19 +31,22 @@ class OutcomeStat:
 
 
 class CampaignOutcomeMemory:
-    """Persistent negative/positive experience for overworld decisions.
+    """Persistent positive/negative experience for overworld decisions.
 
-    The map graph answers *can I move there?*. This layer answers *did doing
-    that actually help?*. It deliberately learns small, interpretable facts:
+    The exact map graph answers *can I move there?*. This layer answers *did
+    doing that actually help?*. It learns small, inspectable facts instead of
+    changing code or replacing the deterministic Pokemon/world mechanics:
 
-    - repeated moves that leave the player on the same tile are bad edges;
-    - recently revisited tiles become more expensive to prevent short loops;
+    - moves that repeatedly leave the player on the same tile are bad edges;
+    - recently revisited tiles become more expensive to break short loops;
     - NPC/coord-event targets that repeatedly produce no story change are
       deprioritized for the current objective;
-    - successful map transitions and story-changing interactions remain cheap.
+    - successful map/story transitions remain preferred evidence.
 
-    It is not an unrestricted self-modifying system. The learned data only
-    adjusts routing costs/target ordering and can always be discarded safely.
+    Hot-path state is kept in memory and checkpointed in small batches. Failures,
+    loop detection, map transitions and objective outcomes force a checkpoint so
+    useful negative experience survives a crash without writing a full JSON file
+    on every normal walking step.
     """
 
     def __init__(
@@ -52,16 +55,19 @@ class CampaignOutcomeMemory:
         *,
         telemetry_path: str | Path = Path("runs/campaign_telemetry.jsonl"),
         recent_limit: int = 96,
+        checkpoint_every: int = 12,
     ) -> None:
         self.path = Path(path)
         self.telemetry_path = Path(telemetry_path)
         self.recent_limit = max(16, int(recent_limit))
+        self.checkpoint_every = max(1, int(checkpoint_every))
         self.tile_visits: dict[str, int] = {}
         self.action_stats: dict[str, OutcomeStat] = {}
         self.target_stats: dict[str, OutcomeStat] = {}
         self.recent_states: deque[str] = deque(maxlen=self.recent_limit)
         self.last_story_digest: str | None = None
         self.last_objective_id: str | None = None
+        self._dirty_events = 0
         self._load()
 
     @staticmethod
@@ -146,6 +152,12 @@ class CampaignOutcomeMemory:
             encoding="utf-8",
         )
         temporary.replace(self.path)
+        self._dirty_events = 0
+
+    def _changed(self, *, force: bool = False) -> None:
+        self._dirty_events += 1
+        if force or self._dirty_events >= self.checkpoint_every:
+            self.save()
 
     def _telemetry(self, event: str, payload: dict[str, Any]) -> None:
         self.telemetry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,8 +209,6 @@ class CampaignOutcomeMemory:
             loop_level = 1
         if story_changed or objective_changed:
             loop_level = 0
-            # A real milestone means old short-term loops are no longer useful
-            # context. Keep only the current state for fresh routing costs.
             self.recent_states.clear()
             self.recent_states.append(key)
 
@@ -210,7 +220,8 @@ class CampaignOutcomeMemory:
             "recent_unique": unique,
             "recent_same_here": same_here,
         }
-        if loop_level or story_changed or objective_changed:
+        important = bool(loop_level or story_changed or objective_changed)
+        if important:
             self._telemetry(
                 "planner_state",
                 {
@@ -221,7 +232,7 @@ class CampaignOutcomeMemory:
                     "objective_id": objective_id,
                 },
             )
-        self.save()
+        self._changed(force=important)
         return result
 
     def record_transition(
@@ -250,9 +261,10 @@ class CampaignOutcomeMemory:
             stat.story_progress += 1
         stat.last_seen_at = datetime.now(UTC).isoformat()
 
+        # Do not append the destination to recent_states here. The planner's
+        # next observe_state() sees it once. Counting both before and after made
+        # normal back-and-forth movement look like a loop twice as quickly.
         after_key = self.location_key(after)
-        self.tile_visits[after_key] = self.tile_visits.get(after_key, 0) + 1
-        self.recent_states.append(after_key)
         self._telemetry(
             "movement",
             {
@@ -269,7 +281,7 @@ class CampaignOutcomeMemory:
                 "no_effect": stat.no_effect,
             },
         )
-        self.save()
+        self._changed(force=not moved or map_changed or story_changed or objective_changed)
         return stat
 
     def action_penalty(
@@ -281,7 +293,6 @@ class CampaignOutcomeMemory:
         stat = self.action_stats.get(self._action_key(objective_id, location, action))
         if stat is None:
             return 0.0
-        # Same-tile failures are strong evidence; successes slowly forgive them.
         return max(
             0.0,
             stat.blocked * 4.0 + stat.no_effect * 2.0 - stat.successes * 1.5,
@@ -318,7 +329,7 @@ class CampaignOutcomeMemory:
                 "no_effect": stat.no_effect,
             },
         )
-        self.save()
+        self._changed(force=True)
         return stat
 
     def target_penalty(
@@ -359,4 +370,5 @@ class CampaignOutcomeMemory:
             "actions": len(self.action_stats),
             "targets": len(self.target_stats),
             "recent_states": len(self.recent_states),
+            "pending_checkpoint_events": self._dirty_events,
         }
