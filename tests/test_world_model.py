@@ -36,6 +36,9 @@ def test_world_model_reads_platinum_collision_bit_and_matrix_adjacency(tmp_path)
         }
     }
     model._rebuild_indexes()
+    # The test uses a deliberately tiny synthetic matrix; do not bootstrap the
+    # 289-file public world index while exercising local graph behavior.
+    model.ensure_matrix_index = lambda: True
     _land_file(model.root / "land" / "map_010.bin", collision_index=5)
     _land_file(model.root / "land" / "map_011.bin")
 
