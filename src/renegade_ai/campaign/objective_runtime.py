@@ -8,7 +8,7 @@ from renegade_ai.actions import DSButton
 from renegade_ai.campaign.live_progression import LiveProgressionDirector
 from renegade_ai.campaign.pathfinding import GridPoint
 from renegade_ai.campaign.progression import ProgressionDecision
-from renegade_ai.campaign.smart_runtime import SmartCampaignAutopilot, _FIELD_LIKE
+from renegade_ai.campaign.smart_runtime import _FIELD_LIKE, SmartCampaignAutopilot
 from renegade_ai.learning.evolve import RewardKind
 from renegade_ai.perception.frame import DSScreens, split_ds_screens
 from renegade_ai.perception.scene import SceneType, detect_scene
