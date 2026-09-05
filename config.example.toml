@@ -1,5 +1,5 @@
 # Copy this file to config.toml only when you need to override defaults.
-# v0.6 prefers validated read-only ARM9 state when melonDS exposes its GDB stub.
+# v0.8 prefers validated read-only ARM9 state when melonDS exposes its GDB stub.
 # Vision/OCR remains the fallback.
 
 [melonds]
@@ -38,6 +38,10 @@ timeout = 1.5
 # The autoplay installer/background watcher patches melonDS.toml to enable GDB
 # and disable JIT (melonDS does not run the GDB stub while JIT is active).
 auto_configure_melonds = true
+# IMPORTANT: keep false for normal play. RenegadeAI immediately continues a new
+# GDB attachment and reads memory while melonDS keeps running; Ctrl-C halts are
+# reserved for explicit diagnostics only.
+halt_reads = false
 
 [learning]
 database = "data/experience.sqlite3"
