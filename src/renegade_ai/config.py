@@ -48,6 +48,9 @@ class MemoryConfig:
     arm9_port: int = 3333
     timeout: float = 1.5
     auto_configure_melonds: bool = True
+    # False is the safe/default live-play mode. melonDS can service read-only
+    # memory packets from its normal GDB polling path without Ctrl-C halts.
+    halt_reads: bool = False
 
 
 @dataclass(slots=True)
@@ -118,6 +121,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     config.memory.auto_configure_melonds = bool(
         memory.get("auto_configure_melonds", config.memory.auto_configure_melonds)
     )
+    config.memory.halt_reads = bool(memory.get("halt_reads", config.memory.halt_reads))
 
     config.learning.database = Path(learning.get("database", config.learning.database))
     config.learning.qtable = Path(learning.get("qtable", config.learning.qtable))
