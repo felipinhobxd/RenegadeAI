@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 
 from renegade_ai.actions import DSButton
@@ -7,7 +8,12 @@ from renegade_ai.campaign.objectives import StoryObjective
 from renegade_ai.campaign.pathfinding import GridPoint, direction_between
 from renegade_ai.campaign.progression import ProgressionDecision, ProgressionDirector
 from renegade_ai.campaign.structured_navigation import StructuredGridNavigator
-from renegade_ai.memory.platinum import StructuredFieldObject, StructuredLocation
+from renegade_ai.memory.platinum import (
+    StructuredFieldObject,
+    StructuredLocation,
+    StructuredProgress,
+    StructuredStoryState,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,12 +26,12 @@ class ObservedPortal:
 
 
 class LiveProgressionDirector(ProgressionDirector):
-    """Objective planner that overlays actual Renegade transitions on Platinum data.
+    """Objective planner that overlays actual Renegade state on Platinum data.
 
-    Static pret/pokeplatinum collision/warps are excellent prior knowledge, but
-    a transition observed from the user's running Renegade Platinum save is the
-    highest-authority evidence. Cross-map edges already learned by the exact RAM
-    navigator are therefore reused as portals before static warp definitions.
+    Static pret/pokeplatinum collision/warps are prior knowledge. Successful
+    cross-map movement observed in the user's running Renegade save has higher
+    authority and is reused first. Scripted coordinate events are also used as
+    local objective targets when no obvious story NPC is available.
     """
 
     @staticmethod
@@ -75,6 +81,39 @@ class LiveProgressionDirector(ProgressionDirector):
                 if destination is not None and destination[0] != source_map_id:
                     result.add(destination[0])
         return result
+
+    def _combined_map_route(
+        self,
+        start_map_id: int,
+        goal_map_ids: set[int],
+        navigator: StructuredGridNavigator,
+        *,
+        max_maps: int = 260,
+    ) -> list[int] | None:
+        """BFS the map graph using both static and actually observed portals."""
+        if start_map_id in goal_map_ids:
+            return [start_map_id]
+        queue: deque[int] = deque([start_map_id])
+        parent: dict[int, int | None] = {start_map_id: None}
+        while queue and len(parent) <= max_maps:
+            current = queue.popleft()
+            neighbors = self.world.map_neighbors(current)
+            neighbors.update(self.observed_map_neighbors(navigator, current))
+            for nxt in sorted(neighbors):
+                if nxt in parent:
+                    continue
+                parent[nxt] = current
+                if nxt in goal_map_ids:
+                    path = [nxt]
+                    while path[-1] != start_map_id:
+                        previous = parent[path[-1]]
+                        if previous is None:
+                            break
+                        path.append(previous)
+                    path.reverse()
+                    return path
+                queue.append(nxt)
+        return None
 
     def _decision_to_portal(
         self,
@@ -142,3 +181,110 @@ class LiveProgressionDirector(ProgressionDirector):
             navigator,
             field_objects,
         )
+
+    def _decision_to_coord_event(
+        self,
+        location: StructuredLocation,
+        objective: StoryObjective,
+        navigator: StructuredGridNavigator,
+        field_objects: tuple[StructuredFieldObject, ...],
+    ) -> ProgressionDecision | None:
+        candidates: list[tuple[int, GridPoint, list[GridPoint]]] = []
+        for raw in self.world.coord_events(location.map_header_id):
+            try:
+                x = int(raw["x"])
+                z = int(raw["z"])
+                width = max(1, int(raw.get("width", 1)))
+                length = max(1, int(raw.get("length", 1)))
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            # Try the center first, then the rectangle's origin. Coordinate
+            # events activate by stepping into their area; no A press is needed.
+            points = [
+                GridPoint(x + (width - 1) // 2, z + (length - 1) // 2),
+                GridPoint(x, z),
+            ]
+            for point in dict.fromkeys(points):
+                path = self._path_to(location, point, navigator, field_objects)
+                if path is None or len(path) < 2:
+                    continue
+                candidates.append((len(path), point, path))
+
+        if not candidates:
+            return None
+        _length, target, path = min(candidates, key=lambda value: value[0])
+        return ProgressionDecision(
+            direction_between(path[0], path[1]),
+            objective,
+            "A* toward a scripted coordinate event on the current story-objective map",
+            target_map_id=location.map_header_id,
+            target_map_name=location.map_name,
+            target=target,
+            path_length=len(path) - 1,
+            should_interact=False,
+        )
+
+    def decide(
+        self,
+        *,
+        location: StructuredLocation,
+        progress: StructuredProgress,
+        story: StructuredStoryState | None,
+        navigator: StructuredGridNavigator,
+        field_objects: tuple[StructuredFieldObject, ...] = (),
+    ) -> ProgressionDecision:
+        base = super().decide(
+            location=location,
+            progress=progress,
+            story=story,
+            navigator=navigator,
+            field_objects=field_objects,
+        )
+        objective = base.objective
+        if objective is None or base.action is not None:
+            self.last_decision = base
+            return base
+
+        goal_ids = {
+            header_id
+            for map_name in objective.target_maps
+            if (header_id := self.world.header_id(map_name)) is not None
+        }
+
+        # If the static map graph cannot reach the objective, retry with any
+        # cross-map transitions learned from this actual Renegade playthrough.
+        if goal_ids and location.map_header_id not in goal_ids:
+            route = self._combined_map_route(
+                location.map_header_id,
+                goal_ids,
+                navigator,
+            )
+            if route and len(route) >= 2:
+                planned = self._decision_to_portal(
+                    location,
+                    route[1],
+                    objective,
+                    navigator,
+                    field_objects,
+                )
+                if planned is not None:
+                    self.last_decision = planned
+                    return planned
+
+        # Once on the intended map, static object events are handled by the
+        # base planner. Coordinate-triggered story scenes are the next safest
+        # structured target before falling back to local frontier exploration.
+        if objective.interact and location.map_header_id in goal_ids:
+            coord = self._decision_to_coord_event(
+                location,
+                objective,
+                navigator,
+                field_objects,
+            )
+            if coord is not None:
+                self.last_decision = coord
+                return coord
+
+        self.last_decision = base
+        return base
