@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from renegade_ai.actions import DSButton
 from renegade_ai.campaign.objectives import StoryObjective
+from renegade_ai.campaign.outcome_memory import CampaignOutcomeMemory
 from renegade_ai.campaign.pathfinding import GridPoint, direction_between
 from renegade_ai.campaign.progression import ProgressionDecision, ProgressionDirector
 from renegade_ai.campaign.structured_navigation import StructuredGridNavigator
@@ -30,9 +31,70 @@ class LiveProgressionDirector(ProgressionDirector):
 
     Static pret/pokeplatinum collision/warps are prior knowledge. Successful
     cross-map movement observed in the user's running Renegade save has higher
-    authority and is reused first. Scripted coordinate events are also used as
-    local objective targets when no obvious story NPC is available.
+    authority and is reused first. Persistent outcome memory adds a second live
+    layer: places/actions that repeatedly do nothing become more expensive, so
+    A* and target selection stop repeating short dead loops.
     """
+
+    def __init__(
+        self,
+        *args,
+        outcome_memory: CampaignOutcomeMemory | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.outcomes = outcome_memory or CampaignOutcomeMemory()
+        self.last_story_digest: str | None = None
+        self.last_badge_count: int | None = None
+        self.last_loop_level: int = 0
+
+    def _walkability(
+        self,
+        location: StructuredLocation,
+        navigator: StructuredGridNavigator,
+        field_objects: tuple[StructuredFieldObject, ...],
+        *,
+        allowed_goal: GridPoint | None = None,
+    ):
+        is_walkable, base_cost = super()._walkability(
+            location,
+            navigator,
+            field_objects,
+            allowed_goal=allowed_goal,
+        )
+
+        def step_cost(point: GridPoint) -> float:
+            return base_cost(point) + self.outcomes.tile_penalty(location.map_header_id, point)
+
+        return is_walkable, step_cost
+
+    def _interaction_targets(self, header_id: int, objective: StoryObjective) -> list[GridPoint]:
+        targets = super()._interaction_targets(header_id, objective)
+        if not targets:
+            return targets
+        ranked = [
+            (
+                self.outcomes.target_suppressed(
+                    objective.id,
+                    header_id,
+                    point,
+                    "interaction",
+                ),
+                self.outcomes.target_penalty(
+                    objective.id,
+                    header_id,
+                    point,
+                    "interaction",
+                ),
+                index,
+                point,
+            )
+            for index, point in enumerate(targets)
+        ]
+        usable = [row for row in ranked if not row[0]]
+        selected = usable or ranked
+        selected.sort(key=lambda row: (row[1], row[2]))
+        return [row[3] for row in selected]
 
     @staticmethod
     def _observed_portals(
@@ -128,17 +190,22 @@ class LiveProgressionDirector(ProgressionDirector):
             location.map_header_id,
             next_map_id,
         )
-        best: tuple[int, ObservedPortal, list[GridPoint]] | None = None
+        best: tuple[float, ObservedPortal, list[GridPoint]] | None = None
         for portal in observed:
             path = self._path_to(location, portal.source, navigator, field_objects)
             if path is None:
                 continue
-            candidate = (len(path), portal, path)
+            source_penalty = self.outcomes.action_penalty(
+                objective.id,
+                location,
+                portal.trigger_action,
+            ) if len(path) == 1 else 0.0
+            candidate = (len(path) + source_penalty, portal, path)
             if best is None or candidate[0] < best[0]:
                 best = candidate
 
         if best is not None:
-            _length, portal, path = best
+            _score, portal, path = best
             if len(path) >= 2:
                 return ProgressionDecision(
                     direction_between(path[0], path[1]),
@@ -189,7 +256,7 @@ class LiveProgressionDirector(ProgressionDirector):
         navigator: StructuredGridNavigator,
         field_objects: tuple[StructuredFieldObject, ...],
     ) -> ProgressionDecision | None:
-        candidates: list[tuple[int, GridPoint, list[GridPoint]]] = []
+        candidates: list[tuple[bool, float, int, GridPoint, list[GridPoint]]] = []
         for raw in self.world.coord_events(location.map_header_id):
             try:
                 x = int(raw["x"])
@@ -209,11 +276,25 @@ class LiveProgressionDirector(ProgressionDirector):
                 path = self._path_to(location, point, navigator, field_objects)
                 if path is None or len(path) < 2:
                     continue
-                candidates.append((len(path), point, path))
+                suppressed = self.outcomes.target_suppressed(
+                    objective.id,
+                    location.map_header_id,
+                    point,
+                    "coord_event",
+                )
+                penalty = self.outcomes.target_penalty(
+                    objective.id,
+                    location.map_header_id,
+                    point,
+                    "coord_event",
+                )
+                candidates.append((suppressed, len(path) + penalty, len(path), point, path))
 
         if not candidates:
             return None
-        _length, target, path = min(candidates, key=lambda value: value[0])
+        usable = [value for value in candidates if not value[0]]
+        selected = usable or candidates
+        _suppressed, _score, _length, target, path = min(selected, key=lambda value: value[1])
         return ProgressionDecision(
             direction_between(path[0], path[1]),
             objective,
@@ -242,6 +323,15 @@ class LiveProgressionDirector(ProgressionDirector):
             field_objects=field_objects,
         )
         objective = base.objective
+        self.last_story_digest = None if story is None else story.digest
+        self.last_badge_count = progress.badge_count
+        observed = self.outcomes.observe_state(
+            location,
+            objective_id=None if objective is None else objective.id,
+            story_digest=self.last_story_digest,
+        )
+        self.last_loop_level = int(observed["loop_level"])
+
         if objective is None or base.action is not None:
             self.last_decision = base
             return base
