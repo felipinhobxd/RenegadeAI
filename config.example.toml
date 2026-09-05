@@ -1,0 +1,51 @@
+# Copy this file to config.toml only when you need to override defaults.
+# v0.8 prefers validated read-only ARM9 state when melonDS exposes its GDB stub.
+# Vision/OCR remains the fallback.
+
+[melonds]
+window_title = "melonDS"
+focus_before_input = true
+press_seconds = 0.06
+direction_press_seconds = 0.14
+input_backend = "auto"
+
+[melonds.keys]
+a = "x"
+b = "z"
+x = "s"
+y = "a"
+l = "q"
+r = "w"
+select = "backspace"
+start = "enter"
+up = "up"
+down = "down"
+left = "left"
+right = "right"
+
+[capture]
+inset_left = 0
+inset_top = 0
+inset_right = 0
+inset_bottom = 0
+screen_layout = "vertical"
+
+[memory]
+enabled = true
+host = "127.0.0.1"
+arm9_port = 3333
+timeout = 1.5
+# The autoplay installer/background watcher patches melonDS.toml to enable GDB
+# and disable JIT (melonDS does not run the GDB stub while JIT is active).
+auto_configure_melonds = true
+# IMPORTANT: keep false for normal play. RenegadeAI immediately continues a new
+# GDB attachment and reads memory while melonDS keeps running; Ctrl-C halts are
+# reserved for explicit diagnostics only.
+halt_reads = false
+
+[learning]
+database = "data/experience.sqlite3"
+qtable = "data/qtable.json"
+alpha = 0.20
+gamma = 0.95
+epsilon = 0.10
