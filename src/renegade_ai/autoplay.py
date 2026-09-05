@@ -133,13 +133,13 @@ def run_daemon(
         memory_client: GDBRemoteClient | None = None
         try:
             dex = ensure_renegade_dex(reporter=_log)
-            from renegade_ai.campaign.smart_runtime import SmartCampaignAutopilot
+            from renegade_ai.campaign.objective_runtime import ObjectiveCampaignAutopilot
 
             memory_client, structured_reader = _connect_structured_memory(config)
             evolve = ASIEvolveEngine(
                 qtable_path=config.learning.qtable.with_name("evolve_qtable.json"),
             )
-            campaign = SmartCampaignAutopilot(
+            campaign = ObjectiveCampaignAutopilot(
                 adapter,
                 config.capture.screen_layout,
                 dex=dex,
@@ -150,25 +150,42 @@ def run_daemon(
 
             if structured_reader is not None:
                 _log(
-                    "Preparing objective navigation world cache: map matrices, real "
-                    "collision blocks and warp graph. This is cached after the first run."
+                    "Preparing objective navigation world cache: real Platinum map-header "
+                    "metadata, matrices, collision blocks and warp graph. This is cached."
                 )
                 complete_world = campaign.progression.world.ensure_matrix_index()
+                try:
+                    location = structured_reader.read_location()
+                    campaign.progression.world.warm_current_map(
+                        location.map_header_id,
+                        location.x,
+                        location.z,
+                    )
+                    decision = campaign._progression_decision(location)
+                    if decision is not None and decision.objective is not None:
+                        _log(
+                            "Current story objective: "
+                            f"{decision.objective.id} - {decision.objective.description}; "
+                            f"planner={decision.reason}."
+                        )
+                except (OSError, GDBRemoteError, ValueError):
+                    pass
                 world_stats = campaign.progression.world.stats()
                 _log(
                     "World planner ready: "
                     f"completeMatrixIndex={complete_world}, stats={world_stats}. "
-                    "Missing static data, if any, falls back to live RAM/vision exploration."
+                    "Static Platinum data is overlaid with movement/warps observed from "
+                    "the live Renegade save."
                 )
 
             mode = (
-                "structured RAM + story objectives + collision/warps + A*"
+                "structured RAM + story objectives + real collision/warps + A*"
                 if structured_reader is not None
                 else "balanced vision/OCR fallback"
             )
             _log(
                 "Autonomous campaign started: "
-                f"navigation={mode}; stuck screenshots, dialogue recovery, "
+                f"navigation={mode}; proactive dialogue detection, stuck screenshots, "
                 "battle takeover and ASI-Evolve are active."
             )
             result = campaign.run()
