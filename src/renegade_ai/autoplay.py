@@ -56,6 +56,13 @@ def _try_auto_configure_debugger(config: AppConfig) -> None:
             "Updated melonDS for structured read-only ARM9 state "
             f"(GDB enabled, JIT disabled): {joined}. A melonDS restart is required."
         )
+    elif result.deferred:
+        joined = ", ".join(str(path) for path in result.deferred)
+        _log(
+            "melonDS is already running, so RenegadeAI will NOT rewrite its config live. "
+            f"Debugger setup is deferred for: {joined}. This session will attach only if "
+            "GDB was already enabled; otherwise vision/OCR keeps playing until the next restart."
+        )
 
 
 def _wait_for_melonds(config_path: Path | None, wait_seconds: float):
@@ -82,6 +89,7 @@ def _connect_structured_memory(
         config.memory.host,
         config.memory.arm9_port,
         timeout=config.memory.timeout,
+        halt_reads=config.memory.halt_reads,
     )
     try:
         client.connect()
@@ -107,12 +115,13 @@ def _connect_structured_memory(
         )
         return None, None
 
+    transport = "halted diagnostic reads" if client.halt_reads else "non-stop live reads"
     _log(
         "Structured ARM9 read-only mode active: "
         f"{location.map_name}#{location.map_header_id} "
         f"({location.x},{location.z}), facing={location.facing}, "
         f"party={party_count}/6, badges={progress.badge_count}, money={progress.money}"
-        f"{enrichment}."
+        f"{enrichment}; transport={transport}, interrupts={client.interrupt_count}."
     )
     return client, reader
 
@@ -173,20 +182,21 @@ def run_daemon(
                 world_stats = campaign.progression.world.stats()
                 _log(
                     "World planner ready: "
-                    f"completeMatrixIndex={complete_world}, stats={world_stats}. "
-                    "Static Platinum data is overlaid with movement/warps observed from "
-                    "the live Renegade save."
+                    f"completeMatrixIndex={complete_world}, stats={world_stats}, "
+                    f"outcomes={campaign.progression.outcomes.stats()}. "
+                    "Static Platinum data is overlaid with movement/warps and no-progress "
+                    "experience observed from the live Renegade save."
                 )
 
             mode = (
-                "structured RAM + story objectives + real collision/warps + A*"
+                "structured RAM + story objectives + real collision/warps + adaptive A*"
                 if structured_reader is not None
                 else "balanced vision/OCR fallback"
             )
             _log(
                 "Autonomous campaign started: "
-                f"navigation={mode}; proactive dialogue detection, stuck screenshots, "
-                "battle takeover and ASI-Evolve are active."
+                f"navigation={mode}; proactive dialogue detection, no-progress/loop learning, "
+                "stuck screenshots, battle takeover and ASI-Evolve are active."
             )
             result = campaign.run()
             _log(
@@ -205,7 +215,9 @@ def run_daemon(
             time.sleep(max(2.0, wait_seconds))
         finally:
             if memory_client is not None:
+                diagnostics = memory_client.diagnostics()
                 memory_client.close()
+                _log(f"Structured-memory transport closed safely: {diagnostics}.")
 
         if once:
             return 0
