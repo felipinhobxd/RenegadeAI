@@ -16,16 +16,20 @@ melonDS
    |      badges / story vars+flags      |
    |      persisted NPC/object hints     |
    |                                     v
-   +--> RGB frame / OCR ----------> Campaign Planner
+   +--> RGB frame / OCR ----------> Story Objective Planner
                                       |
-                              Structured navigation
+                         Platinum collision + warps
                                       |
-                           Battle AI + ASI-Evolve
+                         live Renegade warp overlay
                                       |
-                           DS buttons / touchscreen
+                               local A* routing
+                                      |
+                         Battle AI + ASI-Evolve
+                                      |
+                         DS buttons / touchscreen
 ```
 
-## Current version: 0.6.0
+## Current version: 0.7.0
 
 ### Zero-command autoplay after one-time setup
 
@@ -47,11 +51,60 @@ Runtime log: `runs/autoplay.log`
 Automatic captures: `captures/auto-calibration/`  
 Visual fallback map: `data/campaign_map.json`  
 Structured coordinate map: `data/structured_map.json`  
-Validated memory profile: `data/memory_profile.json`
+Validated memory profile: `data/memory_profile.json`  
+Static world cache: `data/world/`
+
+## v0.7: objective-driven progression, collision/warps and A*
+
+Version 0.7 changes the campaign from primarily frontier exploration to a hierarchical progression planner:
+
+```text
+story flags + badges + visited maps
+              |
+              v
+       current story objective
+              |
+              v
+      target map / NPC / event
+              |
+              v
+ static Platinum map graph + live observed Renegade warps
+              |
+              v
+       real collision grid
+              |
+              v
+            A*
+              |
+              v
+       exact DS movement
+```
+
+The world model now reads the actual `pret/pokeplatinum` field-data schema:
+
+- authoritative map-header -> map-matrix and event-archive metadata;
+- all 289 map matrices using their real `maps` land-data grid;
+- 32x32 terrain attributes from `map_data_###.bin`;
+- the real `0x8000` collision bit;
+- static `WarpEvent` destinations and coordinates;
+- matrix-boundary transitions between outdoor maps;
+- scripted coordinate-event rectangles used by automatic story scenes.
+
+Observed cross-map transitions from the user's running Renegade Platinum save are stored by the exact-coordinate navigator and are preferred over vanilla static warp data when available. This gives the planner a live correction layer if Renegade changes an event or transition.
+
+The story objective planner covers the main campaign hierarchy from the opening/Pokedex sequence through Roark, Galactic/Windworks, Eterna, Hearthome, Veilstone, Pastoria, Celestic/Canalave, Snowpoint, Galactic HQ, Spear Pillar, Distortion World, Sunyshore, Victory Road and the Pokemon League/Hall of Fame. Flags and badge state are preferred over merely remembering that a map was visited.
+
+When the intended map is reached, the planner tries known objective NPCs/objects first and can A* toward scripted coordinate events before falling back to local frontier exploration.
+
+### Dialogue handling
+
+Dialogue detection is active. The agent reads the **upper DS screen**, where Platinum normally renders conversations even when the lower Poketch still looks like ordinary overworld. v0.7 adds a cheap upper-screen dialogue-box cue so OCR can check for dialogue **before** sending another movement command. A dialogue is advanced one `A` press at a time with a new observation between presses.
+
+If progression still stalls, automatic `stuck_...` captures include the screen, RAM map/X/Z/facing, attempted direction, nearby objects, OCR and current objective/A* state.
 
 ## v0.6: read-only structured melonDS state
 
-Version 0.6 adds a **read-only GDB Remote Protocol client** for melonDS ARM9. It implements memory reads but deliberately does not expose memory/register write operations.
+Version 0.6 added a **read-only GDB Remote Protocol client** for melonDS ARM9. It implements memory reads but deliberately does not expose memory/register write operations.
 
 Before trusting any address, RenegadeAI validates the Platinum-compatible game code, the language-specific SaveData pointer, SaveData page-table entries, and the party structure. If any validation fails, the campaign continues with screenshot/OCR navigation instead of guessing.
 
@@ -63,12 +116,6 @@ Structured state currently includes:
 - money, badge mask/count, National Dex and main-story-cleared state;
 - persistent story/script variables and flags;
 - persisted current-map NPC/object hints including coordinates, script/flag IDs and trainer type.
-
-The exact-coordinate navigator persists a graph keyed by `(map_header_id, x, z)`, remembers successful/blocked directions and explores the nearest known frontier deterministically. When a movement attempt is blocked by a known persisted object, it can try `A` immediately instead of treating that NPC/event as an ordinary wall.
-
-Story-state changes are also connected conservatively to ASI-Evolve: meaningful new progress flags earn a small deduplicated reward, while badges, bosses and game completion remain much larger signals.
-
-See `docs/STRUCTURED_MEMORY.md` for the implementation and validation details.
 
 ## Autonomous campaign stack
 
@@ -84,19 +131,27 @@ See `docs/STRUCTURED_MEMORY.md` for the implementation and validation details.
 - [x] persistent story vars/flags reader
 - [x] persisted field-object/NPC hints
 - [x] direct badge and main-story-completion signals
+- [x] proactive upper-screen dialogue detection + one-step advancement
+- [x] real Platinum terrain collision decoding
+- [x] real static warp-event parsing
+- [x] outdoor matrix-boundary graph
+- [x] live observed Renegade warp overlay
+- [x] local objective-aware A* routing
+- [x] hierarchical main-story objective planner
+- [x] scripted coordinate-event targeting on objective maps
 - [x] vision/OCR fallback if structured state is unavailable
-- [x] automatic battle takeover and return to campaign exploration
+- [x] automatic battle takeover and return to campaign progression
 - [x] bounded ASI-Evolve reward/learning memory
+- [x] automatic stuck screenshots with objective/navigation context
 - [x] automatic screenshot calibration inbox
 - [x] automatic reattachment when melonDS closes/reopens
 - [ ] live field-object manager state instead of only persisted object hints
-- [ ] collision/tile-behavior and warp graph extraction
-- [ ] objective-aware A* routing across maps/warps
-- [ ] full story objective graph derived from scripts/flags
+- [ ] exact dynamic collision for every special puzzle/moving platform
 - [ ] full inventory/party/battle structs directly from RAM
+- [ ] objective-specific solutions for every puzzle/minigame edge case
 - [ ] measured repeatable end-to-end Hall-of-Fame completion rate
 
-This is still an **experimental autonomous campaign agent**, not a claim of a measured 100% completion rate yet. The major remaining navigation work is collision/warp extraction plus an explicit story objective planner.
+The v0.7 planner is intended to make real campaign progress rather than wander randomly, but it is still an **experimental autonomous agent**. A full Hall-of-Fame run has not yet been measured end to end, so unsupported local puzzles/events can still fall back to exploration and automatic stuck capture.
 
 ## National Dex strategy layer
 
