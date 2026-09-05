@@ -21,12 +21,35 @@ def story(*flags: str) -> StructuredStoryState:
     )
 
 
+def test_opening_requires_pokedex_then_journal():
+    planner = StoryObjectivePlanner()
+    objective = planner.choose(
+        current_map="SANDGEM_TOWN",
+        progress=progress(0),
+        story=story(),
+        visited_maps={"SANDGEM_TOWN"},
+    )
+    assert objective is not None
+    assert objective.id == "get_pokedex"
+    assert objective.target_maps == ("SANDGEM_TOWN_POKEMON_RESEARCH_LAB",)
+
+    objective = planner.choose(
+        current_map="SANDGEM_TOWN",
+        progress=progress(0),
+        story=story("FLAG_HAS_POKEDEX"),
+        visited_maps={"SANDGEM_TOWN"},
+    )
+    assert objective is not None
+    assert objective.id == "return_home_for_journal"
+
+
 def test_zero_badges_routes_to_roark_mine_before_gym():
     planner = StoryObjectivePlanner()
+    opening_flags = ("FLAG_HAS_POKEDEX", "FLAG_JOURNAL_ACQUIRED")
     objective = planner.choose(
         current_map="OREBURGH_CITY",
         progress=progress(0),
-        story=story(),
+        story=story(*opening_flags),
         visited_maps={"SANDGEM_TOWN", "JUBILIFE_CITY", "OREBURGH_CITY"},
     )
     assert objective is not None
@@ -36,7 +59,7 @@ def test_zero_badges_routes_to_roark_mine_before_gym():
     objective = planner.choose(
         current_map="OREBURGH_CITY",
         progress=progress(0),
-        story=story("FLAG_ROARK_RETURNED_TO_OREBURGH_GYM"),
+        story=story(*opening_flags, "FLAG_ROARK_RETURNED_TO_OREBURGH_GYM"),
         visited_maps={"SANDGEM_TOWN", "JUBILIFE_CITY", "OREBURGH_CITY"},
     )
     assert objective is not None
